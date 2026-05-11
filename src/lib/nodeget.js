@@ -4,6 +4,8 @@ import {
   buildControlScript,
   buildDeployScript,
   buildGenerateRealityKeypairScript,
+  buildPortJumpApplyScript,
+  buildPortJumpRemoveScript,
   buildReadStateScript,
   buildRealityScanScript,
   buildUninstallScript,
@@ -176,5 +178,25 @@ export async function runRealityScan(client, token, uuid, params, options = {}) 
     timeoutMs: options.timeoutMs ?? timeoutBase,
     ...options,
   });
+  return { rawOutput: result.output };
+}
+
+export async function applyPortJump(client, token, uuid, payload, options = {}) {
+  const result = await runShell(client, token, uuid, buildPortJumpApplyScript(payload), {
+    timeoutMs: 60000,
+    ...options,
+  });
+  return { rawOutput: result.output };
+}
+
+export async function removePortJumpUnits(client, token, uuid, serviceNames, options = {}) {
+  if (!serviceNames.length) return { rawOutput: "" };
+  const result = await runShell(
+    client,
+    token,
+    uuid,
+    buildPortJumpRemoveScript(serviceNames),
+    { timeoutMs: 60000, ...options },
+  );
   return { rawOutput: result.output };
 }

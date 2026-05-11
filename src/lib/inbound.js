@@ -35,6 +35,7 @@ export function emptyInboundForm() {
     label: "nodeget",
     privateKey: "",
     publicKey: "",
+    portJumpRange: "",
   };
 }
 

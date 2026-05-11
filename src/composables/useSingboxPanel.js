@@ -11,7 +11,9 @@ import {
 } from "@/lib/inbound";
 import { makeMeta } from "@/lib/state";
 import { normalizeRealityDomain, parseRealityTargetOutput } from "@/lib/realityTools";
+import { canonicalPortJumpRange, parsePortJumpRange, toIptablesMultiportSpec } from "@/lib/portJump";
 import {
+  applyPortJump,
   controlSingboxService,
   createNodegetClient,
   deployNodeState,
@@ -19,6 +21,7 @@ import {
   listNodeNames,
   listNodeUuids,
   readNodeState,
+  removePortJumpUnits,
   runRealityScan,
   uninstallSingbox,
 } from "@/lib/nodeget";
@@ -356,6 +359,67 @@ function detectPortConflict(targetTag, port) {
   }
 }
 
+function portJumpServiceName(tag) {
+  return `nodeget-singbox-portjump-${tag.replace(/^nodeget-/, "")}`;
+}
+
+function inboundNeedsPortJump(entry) {
+  return entry?.protocolId === "hysteria2" && Boolean(entry?.form?.portJumpRange);
+}
+
+function validatePortJumpForm(formSnapshot, protocolId, port) {
+  if (protocolId !== "hysteria2") return null;
+  const raw = formSnapshot.portJumpRange;
+  if (!raw || !String(raw).trim()) return null;
+  const { ranges, error } = parsePortJumpRange(raw);
+  if (error) throw new Error(`端口跳跃：${error}`);
+  for (const r of ranges) {
+    if (port >= r.start && port <= r.end) {
+      throw new Error(`端口跳跃段 ${r.start}-${r.end} 覆盖了入站端口 ${port}`);
+    }
+  }
+  return canonicalPortJumpRange(raw);
+}
+
+async function syncPortJump(token, uuid, ctrl, before, after) {
+  const beforeNames = new Map(
+    before
+      .filter(inboundNeedsPortJump)
+      .map((it) => [portJumpServiceName(it.tag), it.form.portJumpRange]),
+  );
+  const afterNames = new Map(
+    after
+      .filter(inboundNeedsPortJump)
+      .map((it) => [
+        portJumpServiceName(it.tag),
+        { range: it.form.portJumpRange, port: it.form.endpointPort },
+      ]),
+  );
+
+  const toRemove = [...beforeNames.keys()].filter((name) => {
+    const next = afterNames.get(name);
+    return !next || next.range !== beforeNames.get(name);
+  });
+  if (toRemove.length) {
+    await removePortJumpUnits(client, token, uuid, toRemove, { signal: ctrl.signal });
+  }
+
+  for (const [name, payload] of afterNames.entries()) {
+    if (beforeNames.get(name) === payload.range) continue;
+    await applyPortJump(
+      client,
+      token,
+      uuid,
+      {
+        serviceName: name,
+        targetPort: payload.port,
+        multiportSpec: toIptablesMultiportSpec(payload.range),
+      },
+      { signal: ctrl.signal },
+    );
+  }
+}
+
 async function ensureRealityKeypair(token, uuid, ctrl) {
   if (protocol.value?.tlsMode !== "reality") return;
   if (form.privateKey && form.publicKey) return;
@@ -424,6 +488,17 @@ async function saveInbound() {
     return;
   }
 
+  let portPort;
+  try {
+    portPort = parsePort(form.endpointPort, "端口");
+    const normalized = validatePortJumpForm(form, selectedProtocolId.value, portPort);
+    if (normalized != null) form.portJumpRange = normalized;
+  } catch (e) {
+    commandError.value = errorMessage(e);
+    return;
+  }
+
+  const before = inbounds.value.slice();
   const ctrl = newAbortController();
   commandRunning.value = true;
   try {
@@ -437,6 +512,7 @@ async function saveInbound() {
       { config, meta },
       { signal: ctrl.signal },
     );
+    await syncPortJump(token, uuid, ctrl, before, nextInbounds);
     inbounds.value = nextInbounds;
     serviceActive.value = result.serviceActive;
     if (!isEditing.value) {
@@ -474,6 +550,7 @@ async function deleteInbound() {
     return;
   }
   const dropId = selectedInboundId.value;
+  const before = inbounds.value.slice();
   const ctrl = newAbortController();
   commandRunning.value = true;
   try {
@@ -485,6 +562,7 @@ async function deleteInbound() {
       { config, meta },
       { signal: ctrl.signal },
     );
+    await syncPortJump(token, uuid, ctrl, before, nextInbounds);
     inbounds.value = nextInbounds;
     serviceActive.value = result.serviceActive;
     selectInbound(null);
@@ -677,7 +755,7 @@ function mergeInboundIntoState(formSnapshot, protocolId, state) {
     foreignInbounds: state.foreignInbounds || [],
   });
   const meta = makeMeta(next);
-  return { config, meta };
+  return { config, meta, nextInbounds: next };
 }
 
 async function batchDeploy() {
@@ -721,6 +799,17 @@ async function batchDeploy() {
     const snapshot = { ...form };
     const protocolId = selectedProtocolId.value;
 
+    try {
+      const port = parsePort(snapshot.endpointPort, "端口");
+      const normalized = validatePortJumpForm(snapshot, protocolId, port);
+      if (normalized != null) snapshot.portJumpRange = normalized;
+    } catch (e) {
+      commandError.value = errorMessage(e);
+      batchRunning.value = false;
+      if (pendingAbort === ctrl) pendingAbort = null;
+      return;
+    }
+
     for (let i = 0; i < targets.length; i++) {
       const uuid = targets[i];
       batchProgress.value = batchProgress.value.map((row, idx) =>
@@ -728,7 +817,12 @@ async function batchDeploy() {
       );
       try {
         const state = await readNodeState(client, token, uuid, { signal: ctrl.signal });
-        const { config, meta } = mergeInboundIntoState(snapshot, protocolId, state);
+        const beforeRemote = state.meta?.inbounds || [];
+        const { config, meta, nextInbounds } = mergeInboundIntoState(
+          snapshot,
+          protocolId,
+          state,
+        );
         batchProgress.value = batchProgress.value.map((row, idx) =>
           idx === i ? { ...row, status: "deploying" } : row,
         );
@@ -739,6 +833,7 @@ async function batchDeploy() {
           { config, meta },
           { signal: ctrl.signal },
         );
+        await syncPortJump(token, uuid, ctrl, beforeRemote, nextInbounds);
         batchProgress.value = batchProgress.value.map((row, idx) =>
           idx === i ? { uuid, status: "ok", message: r.serviceActive } : row,
         );

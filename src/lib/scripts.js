@@ -5,6 +5,8 @@ import controlScript from "./scripts/control.sh?raw";
 import uninstallScript from "./scripts/uninstall.sh?raw";
 import generateRealityKeypairScript from "./scripts/generate_reality_keypair.sh?raw";
 import realityScanScript from "./scripts/reality_scan.sh?raw";
+import portjumpApplyScript from "./scripts/portjump_apply.sh?raw";
+import portjumpRemoveScript from "./scripts/portjump_remove.sh?raw";
 
 function shellQuote(value) {
   return `'${String(value ?? "").replaceAll("'", `'\\''`)}'`;
@@ -85,4 +87,22 @@ function clampInt(value, fallback, min, max) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) return fallback;
   return String(Math.min(Math.max(parsed, min), max));
+}
+
+export function buildPortJumpApplyScript({ serviceName, targetPort, multiportSpec }) {
+  return assemble(
+    {
+      NGP_PORTJUMP_SERVICE: serviceName,
+      NGP_PORTJUMP_TARGET: String(targetPort),
+      NGP_PORTJUMP_RANGE: multiportSpec,
+    },
+    portjumpApplyScript,
+  );
+}
+
+export function buildPortJumpRemoveScript(serviceNames) {
+  return assemble(
+    { NGP_PORTJUMP_SERVICES: serviceNames.join(" ") },
+    portjumpRemoveScript,
+  );
 }

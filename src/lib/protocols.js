@@ -119,6 +119,12 @@ export const FIELD_DEFS = {
     label: "Obfs 密码",
     type: "text",
   },
+  portJumpRange: {
+    key: "portJumpRange",
+    label: "端口跳跃范围",
+    type: "text",
+    placeholder: "20000-50000 或 20000-40000,45000-50000",
+  },
   congestionControl: {
     key: "congestionControl",
     label: "拥塞控制",
@@ -599,6 +605,7 @@ export const PROTOCOLS = [
       "downMbps",
       "obfsType",
       "obfsPassword",
+      "portJumpRange",
     ],
     requiredFields: [
       "endpointHost",

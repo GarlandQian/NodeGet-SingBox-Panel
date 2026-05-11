@@ -130,6 +130,9 @@ function buildHysteria2Uri(form, label) {
     params.set("obfs", form.obfsType);
     params.set("obfs-password", form.obfsPassword);
   }
+  if (form.portJumpRange) {
+    params.set("mport", form.portJumpRange);
+  }
   return `hy2://${encodeURIComponent(form.password)}@${formatHostPort(form.endpointHost, form.endpointPort)}?${params.toString()}#${encodeURIComponent(label)}`;
 }
 
@@ -207,6 +210,7 @@ export function buildConnectionDetails(protocolId, form) {
     if (cleaned.upMbps) details.push(["Up Mbps", String(cleaned.upMbps)]);
     if (cleaned.downMbps) details.push(["Down Mbps", String(cleaned.downMbps)]);
     if (cleaned.obfsType) details.push(["Obfs", cleaned.obfsType]);
+    if (cleaned.portJumpRange) details.push(["端口跳跃", cleaned.portJumpRange]);
   }
   return details;
 }

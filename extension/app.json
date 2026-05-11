@@ -1,7 +1,7 @@
 {
   "name": "nodeget-singbox-panel",
   "icon": "assets/icon.svg",
-  "version": "0.3.4",
+  "version": "0.4.0",
   "description": "NodeGet Dashboard sing-box 配置管理扩展",
   "extension_version": 1,
   "author": "NodeGet",
