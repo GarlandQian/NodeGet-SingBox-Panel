@@ -1,0 +1,54 @@
+{
+  "name": "nodeget-singbox-panel",
+  "icon": "assets/icon.svg",
+  "version": "0.3.4",
+  "description": "NodeGet Dashboard sing-box 配置管理扩展",
+  "extension_version": 1,
+  "author": "NodeGet",
+  "repository": "",
+  "homepage": "",
+  "license": "MIT",
+  "routes": [
+    {
+      "type": "global",
+      "name": "sing-box 配置管理",
+      "icon": "assets/route-icon.svg",
+      "entry": "index.html"
+    },
+    {
+      "type": "node",
+      "name": "sing-box 配置管理（节点）",
+      "icon": "assets/route-icon.svg",
+      "entry": "index.html"
+    }
+  ],
+  "limits": [
+    {
+      "permissions": [
+        {
+          "node_get": "list_all_agent_uuid"
+        },
+        {
+          "kv": {
+            "read": "metadata_name"
+          }
+        },
+        {
+          "task": {
+            "create": "execute"
+          }
+        },
+        {
+          "task": {
+            "read": "execute"
+          }
+        }
+      ],
+      "scopes": [
+        {
+          "global": null
+        }
+      ]
+    }
+  ]
+}
