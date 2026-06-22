@@ -7,8 +7,9 @@ else
   printf 'NGP_SINGBOX_VERSION=%s\n' "missing"
 fi
 
-printf 'NGP_SERVICE_ACTIVE=%s\n' "$(systemctl is-active sing-box 2>/dev/null || echo inactive)"
-printf 'NGP_SERVICE_ENABLED=%s\n' "$(systemctl is-enabled sing-box 2>/dev/null || echo disabled)"
+printf 'NGP_SERVICE_ACTIVE=%s\n' "$(ngp_service_active sing-box)"
+printf 'NGP_SERVICE_ENABLED=%s\n' "$(ngp_service_enabled sing-box)"
+printf 'NGP_SERVICE_MANAGER=%s\n' "$(ngp_service_manager)"
 printf 'NGP_HOST_ARCH=%s\n' "$(uname -m)"
 printf 'NGP_HOST_KERNEL=%s\n' "$(uname -r)"
 
