@@ -99,6 +99,20 @@ ngp_decode_to() {
   rm -f "$tmp"
 }
 
+ngp_migrate_legacy_meta() {
+  meta_file="${1:-/etc/nodeget-singbox-panel/nodeget.json}"
+  legacy_meta_file="${2:-/etc/sing-box/nodeget.json}"
+  if ngp_root test -f "$legacy_meta_file"; then
+    if ! ngp_root test -f "$meta_file"; then
+      tmp="$(mktemp)"
+      ngp_root cat "$legacy_meta_file" > "$tmp"
+      ngp_write_root_file "$tmp" "$meta_file" 0644
+      rm -f "$tmp"
+    fi
+    ngp_root rm -f "$legacy_meta_file"
+  fi
+}
+
 ngp_service_manager() {
   if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
     echo "systemd"

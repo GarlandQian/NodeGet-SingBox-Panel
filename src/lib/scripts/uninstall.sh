@@ -1,5 +1,6 @@
 ngp_service_disable_now sing-box >/dev/null 2>&1 || true
 ngp_root rm -rf /etc/sing-box
+ngp_root rm -rf /etc/nodeget-singbox-panel
 
 # Remove all nodeget-singbox-portjump-* services
 for unit_path in /etc/systemd/system/nodeget-singbox-portjump-*.service; do

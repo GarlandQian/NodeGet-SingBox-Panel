@@ -1,7 +1,11 @@
 action="${NGP_ACTION:-status}"
 
 case "$action" in
-  start|stop|restart)
+  start|restart)
+    ngp_migrate_legacy_meta
+    "ngp_service_$action" sing-box
+    ;;
+  stop)
     "ngp_service_$action" sing-box
     ;;
   status)

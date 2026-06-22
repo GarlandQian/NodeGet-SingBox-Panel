@@ -1,10 +1,12 @@
 CONFIG_FILE="/etc/sing-box/config.json"
-META_FILE="/etc/sing-box/nodeget.json"
+META_FILE="/etc/nodeget-singbox-panel/nodeget.json"
+LEGACY_META_FILE="/etc/sing-box/nodeget.json"
 
 ngp_ensure_singbox
 
 ngp_decode_to NGP_CONFIG_B64 "$CONFIG_FILE"
 ngp_decode_to NGP_META_B64 "$META_FILE"
+ngp_migrate_legacy_meta "$META_FILE" "$LEGACY_META_FILE"
 ngp_root chmod 0600 "$CONFIG_FILE"
 
 ngp_root "$(ngp_singbox_bin)" check -c "$CONFIG_FILE"
