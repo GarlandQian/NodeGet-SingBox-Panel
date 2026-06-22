@@ -31,9 +31,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Added Alpine/OpenRC node compatibility.
-          - Switched remote execution from bash to POSIX sh.
-          - Added OpenRC support for sing-box and port-jump services.
+          - Moved NodeGet metadata out of `/etc/sing-box` so Alpine/OpenRC no longer loads it as a sing-box config.
+          - Migrates and removes the legacy `/etc/sing-box/nodeget.json` metadata file before starting sing-box.
+          - Keeps release assets versioned with a single extension zip.
           NOTES
 
       - name: Publish release
