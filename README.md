@@ -27,6 +27,7 @@ NodeGet Dashboard 扩展，用于在节点上安装和管理 sing-box 配置。
 ## 节点侧
 
 - 需要目标节点具备 `root` 权限或免密 `sudo`
+- 支持 systemd 与 Alpine/OpenRC 节点
 - 配置写入 `/etc/sing-box/config.json`
 - 服务名使用 `sing-box`
 - VLESS Reality 公钥在添加配置时由节点生成

@@ -128,7 +128,7 @@ export async function runExecuteTask(
 }
 
 async function runShell(client, token, uuid, script, options = {}) {
-  return runExecuteTask(client, token, uuid, "bash", ["-lc", script], options);
+  return runExecuteTask(client, token, uuid, "sh", ["-c", script], options);
 }
 
 export async function readNodeState(client, token, uuid, options = {}) {

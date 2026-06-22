@@ -1,12 +1,6 @@
-if ! command -v sing-box >/dev/null 2>&1; then
-  if ! command -v curl >/dev/null 2>&1; then
-    echo "NGP_ERROR=missing_curl"
-    exit 1
-  fi
-  ngp_root_sh 'curl -fsSL https://sing-box.app/install.sh | sh'
-fi
+ngp_ensure_singbox
 
-keypair="$(sing-box generate reality-keypair)"
+keypair="$(ngp_root "$(ngp_singbox_bin)" generate reality-keypair)"
 private_key="$(printf '%s\n' "$keypair" | awk -F': *' '/PrivateKey/ {print $2; exit}')"
 public_key="$(printf '%s\n' "$keypair" | awk -F': *' '/PublicKey/ {print $2; exit}')"
 

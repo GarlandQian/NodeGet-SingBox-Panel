@@ -30,14 +30,19 @@ cleanup() {
 trap cleanup EXIT
 
 require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "NGP_REALITY_ERROR=missing_$1"
+  cmd="$1"
+  pkg="${2:-$1}"
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    ngp_try_install_package "$pkg" || true
+  fi
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "NGP_REALITY_ERROR=missing_$cmd"
     exit 1
   fi
 }
 
 download_file() {
-  require_command curl
+  require_command curl curl
   curl -fL --retry 3 --connect-timeout 10 -o "$2.tmp" "$1"
   mv "$2.tmp" "$2"
 }
@@ -45,6 +50,11 @@ download_file() {
 extract_zip() {
   zip_file="$1"
   dest_dir="$2"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -oq "$zip_file" -d "$dest_dir"
+    return
+  fi
+  ngp_try_install_package unzip || true
   if command -v unzip >/dev/null 2>&1; then
     unzip -oq "$zip_file" -d "$dest_dir"
     return
@@ -118,7 +128,7 @@ ensure_reality_checker() {
   chmod +x "$CHECKER"
 }
 
-require_command timeout
+require_command timeout coreutils
 ensure_reali_tls_scanner
 ensure_reality_checker
 

@@ -2,7 +2,7 @@ action="${NGP_ACTION:-status}"
 
 case "$action" in
   start|stop|restart)
-    ngp_root systemctl "$action" sing-box
+    "ngp_service_$action" sing-box
     ;;
   status)
     ;;
@@ -12,5 +12,6 @@ case "$action" in
     ;;
 esac
 
-printf 'NGP_SERVICE_ACTIVE=%s\n' "$(systemctl is-active sing-box 2>/dev/null || echo inactive)"
-printf 'NGP_SERVICE_ENABLED=%s\n' "$(systemctl is-enabled sing-box 2>/dev/null || echo disabled)"
+printf 'NGP_SERVICE_ACTIVE=%s\n' "$(ngp_service_active sing-box)"
+printf 'NGP_SERVICE_ENABLED=%s\n' "$(ngp_service_enabled sing-box)"
+printf 'NGP_SERVICE_MANAGER=%s\n' "$(ngp_service_manager)"

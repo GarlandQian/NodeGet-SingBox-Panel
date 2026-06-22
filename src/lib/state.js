@@ -65,6 +65,7 @@ export function parseReadStateOutput(rawOutput) {
     scalars,
     serviceActive: scalars.SERVICE_ACTIVE || "unknown",
     serviceEnabled: scalars.SERVICE_ENABLED || "unknown",
+    serviceManager: scalars.SERVICE_MANAGER || "unknown",
     singboxVersion: scalars.SINGBOX_VERSION || "unknown",
     hostArch: scalars.HOST_ARCH || "",
     hostKernel: scalars.HOST_KERNEL || "",
@@ -128,6 +129,7 @@ export function parseDeployOutput(rawOutput) {
   const scalars = parseScalars(rawOutput);
   return {
     serviceActive: scalars.SERVICE_ACTIVE || "unknown",
+    serviceManager: scalars.SERVICE_MANAGER || "unknown",
     configFile: scalars.CONFIG_FILE || "",
     metaFile: scalars.META_FILE || "",
   };
@@ -138,5 +140,6 @@ export function parseControlOutput(rawOutput) {
   return {
     serviceActive: scalars.SERVICE_ACTIVE || "unknown",
     serviceEnabled: scalars.SERVICE_ENABLED || "unknown",
+    serviceManager: scalars.SERVICE_MANAGER || "unknown",
   };
 }
