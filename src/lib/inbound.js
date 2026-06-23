@@ -59,6 +59,7 @@ function buildTls(protocol, form) {
   if (protocol.tlsMode === "reality") {
     return {
       enabled: true,
+      server_name: trim(form.handshakeHost),
       reality: {
         enabled: true,
         handshake: {
