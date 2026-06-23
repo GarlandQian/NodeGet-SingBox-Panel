@@ -4,8 +4,10 @@ LEGACY_META_FILE="/etc/sing-box/nodeget.json"
 
 if command -v sing-box >/dev/null 2>&1; then
   printf 'NGP_SINGBOX_VERSION=%s\n' "$(sing-box version 2>/dev/null | head -n 1 | awk '{print $NF}' || echo unknown)"
+  printf 'NGP_SINGBOX_BIN=%s\n' "$(ngp_singbox_bin 2>/dev/null || echo unknown)"
 else
   printf 'NGP_SINGBOX_VERSION=%s\n' "missing"
+  printf 'NGP_SINGBOX_BIN=%s\n' "missing"
 fi
 
 printf 'NGP_SERVICE_ACTIVE=%s\n' "$(ngp_service_active sing-box)"
@@ -28,3 +30,33 @@ elif ngp_root test -f "$LEGACY_META_FILE"; then
   ngp_root cat "$LEGACY_META_FILE"
 fi
 echo 'NGP_META_END'
+
+echo 'NGP_CONFIG_CHECK_BEGIN'
+if command -v sing-box >/dev/null 2>&1 && ngp_root test -f "$CONFIG_FILE"; then
+  if ngp_root "$(ngp_singbox_bin)" check -c "$CONFIG_FILE" 2>&1; then
+    echo "check_ok"
+  else
+    echo "check_failed"
+  fi
+else
+  echo "check_skipped"
+fi
+echo 'NGP_CONFIG_CHECK_END'
+
+echo 'NGP_PROCESS_BEGIN'
+if ps -eo pid,args >/dev/null 2>&1; then
+  ps -eo pid,args | awk '/[s]ing-box/ { print }' || true
+else
+  ps | awk '/[s]ing-box/ { print }' || true
+fi
+echo 'NGP_PROCESS_END'
+
+echo 'NGP_LISTEN_BEGIN'
+if command -v ss >/dev/null 2>&1; then
+  ss -lntup 2>/dev/null | awk 'NR == 1 || /sing-box|LISTEN|udp/ { print }' || true
+elif command -v netstat >/dev/null 2>&1; then
+  netstat -lntup 2>/dev/null | awk 'NR <= 2 || /sing-box|LISTEN|udp/ { print }' || true
+else
+  echo "missing_ss_or_netstat"
+fi
+echo 'NGP_LISTEN_END'
