@@ -60,21 +60,22 @@ function appendTransportParams(params, protocol, form) {
 }
 
 function buildVlessUri(protocol, form, label) {
-  const params = new URLSearchParams({
-    encryption: "none",
-    type: protocol.transport === "tcp" ? "tcp" : protocol.transport,
-  });
+  const params = new URLSearchParams();
+  params.set("encryption", "none");
   if (protocol.tlsMode === "reality") {
+    if (protocol.transport === "tcp") params.set("flow", "xtls-rprx-vision");
     params.set("security", "reality");
     params.set("sni", shareHost(form));
     params.set("fp", "chrome");
     params.set("pbk", form.publicKey || "");
     params.set("sid", form.shortId);
-    if (protocol.transport === "tcp") params.set("flow", "xtls-rprx-vision");
+    if (protocol.transport === "tcp") params.set("spx", "/");
   } else if (protocol.tlsMode === "cert") {
     params.set("security", "tls");
     params.set("sni", shareHost(form));
   }
+  params.set("type", protocol.transport === "tcp" ? "tcp" : protocol.transport);
+  if (protocol.transport === "tcp") params.set("headerType", "none");
   appendTransportParams(params, protocol, form);
   return `vless://${form.uuid}@${formatHostPort(form.endpointHost, form.endpointPort)}?${params.toString()}#${encodeURIComponent(label)}`;
 }

@@ -31,9 +31,10 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Adds `server_name` to generated VLESS Reality inbound TLS config.
-          - Fixes Reality clients failing with `reality verification failed`.
-          - Adds recent sing-box service logs to node-side diagnostics.
+          - Emits VLESS Reality share URLs in a more compatible TCP Reality format.
+          - Emits Mihomo / Clash Meta VLESS Reality proxies in the tested working YAML format.
+          - Adds explicit `network: tcp` for TCP VLESS YAML exports.
+          - Renames the YAML export menu item to avoid old Clash compatibility confusion.
           NOTES
 
       - name: Publish release

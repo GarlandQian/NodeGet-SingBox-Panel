@@ -51,7 +51,7 @@ function inboundToClashProxy(inbound, fallbackLabel) {
   if (!server || !port) return null;
 
   if (protocol.family === "vless") {
-    const proxy = {
+    const proxy = compactObject({
       name,
       type: "vless",
       server,
@@ -59,20 +59,21 @@ function inboundToClashProxy(inbound, fallbackLabel) {
       uuid: form.uuid,
       udp: true,
       tls: protocol.tlsMode !== "none",
-      "client-fingerprint": "chrome",
-      "skip-cert-verify": false,
-    };
+    });
     if (protocol.tlsMode === "reality") {
       proxy.servername = form.handshakeHost;
+      proxy["client-fingerprint"] = "chrome";
+      if (protocol.transport === "tcp") proxy.flow = "xtls-rprx-vision";
       proxy["reality-opts"] = {
         "public-key": form.publicKey,
         "short-id": form.shortId,
       };
-      if (protocol.transport === "tcp") proxy.flow = "xtls-rprx-vision";
     } else if (protocol.tlsMode === "cert") {
       proxy.servername = form.handshakeHost;
     }
-    if (protocol.transport === "ws") {
+    if (protocol.transport === "tcp") {
+      proxy.network = "tcp";
+    } else if (protocol.transport === "ws") {
       proxy.network = "ws";
       proxy["ws-opts"] = {
         path: form.path || "/",
@@ -225,7 +226,10 @@ function emitYaml(value, indent = 0) {
     return value
       .map((item) => {
         if (item && typeof item === "object") {
-          const body = emitYaml(item, indent + 1).replace(/^ {2}/, "");
+          const body = emitYaml(item, indent + 1).replace(
+            new RegExp(`^ {${(indent + 1) * 2}}`),
+            "",
+          );
           return `${pad}- ${body}`;
         }
         return `${pad}- ${yamlScalar(item)}`;
