@@ -31,9 +31,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Added sing-box outbound transport fields for WS, HTTP, gRPC, and HTTPUpgrade exports.
-          - Improved Mihomo/Clash export compatibility for VLESS TLS and Hysteria2.
-          - Added Hysteria2 `ports` export for port-jump configurations.
+          - Forces the managed sing-box service to run `/etc/sing-box/config.json`.
+          - Adds node-side diagnostics for config checks, sing-box process args, and listening sockets.
+          - Helps distinguish service/config issues from firewall or client import issues.
           NOTES
 
       - name: Publish release

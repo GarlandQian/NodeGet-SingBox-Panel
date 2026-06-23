@@ -298,7 +298,31 @@ ngp_singbox_bin() {
 ngp_ensure_singbox_service() {
   manager="$(ngp_service_manager)"
   case "$manager" in
-    systemd|service)
+    systemd)
+      singbox_bin="$(ngp_singbox_bin)" || ngp_error "missing_sing-box"
+      tmp="$(mktemp)"
+      cat > "$tmp" <<EOF
+[Unit]
+Description=sing-box service
+Documentation=https://sing-box.sagernet.org/
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
+[Service]
+ExecStart=${singbox_bin} run -c /etc/sing-box/config.json
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+RestartSec=10s
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      ngp_write_root_file "$tmp" /etc/systemd/system/sing-box.service 0644
+      rm -f "$tmp"
+      ngp_service_reload
+      ;;
+    service)
       return
       ;;
     openrc)
