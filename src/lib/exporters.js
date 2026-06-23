@@ -1,6 +1,46 @@
 import { buildShareUri } from "./singbox";
 import { getProtocol } from "./protocols";
 
+function compactObject(object) {
+  return Object.fromEntries(
+    Object.entries(object).filter(([, value]) => value !== undefined && value !== ""),
+  );
+}
+
+function buildOutboundTransport(protocol, form) {
+  if (!protocol.transport || protocol.transport === "tcp" || protocol.transport === "quic") {
+    return null;
+  }
+  if (protocol.transport === "ws") {
+    return compactObject({
+      type: "ws",
+      path: form.path || "/",
+      headers: form.transportHost ? { Host: form.transportHost } : undefined,
+    });
+  }
+  if (protocol.transport === "http") {
+    return compactObject({
+      type: "http",
+      path: form.path || "/",
+      host: form.transportHost ? [form.transportHost] : undefined,
+    });
+  }
+  if (protocol.transport === "grpc") {
+    return compactObject({
+      type: "grpc",
+      service_name: form.serviceName || "",
+    });
+  }
+  if (protocol.transport === "httpupgrade") {
+    return compactObject({
+      type: "httpupgrade",
+      path: form.path || "/",
+      host: form.transportHost,
+    });
+  }
+  return null;
+}
+
 function inboundToClashProxy(inbound, fallbackLabel) {
   const protocol = getProtocol(inbound.protocolId);
   if (!protocol) return null;
@@ -30,7 +70,7 @@ function inboundToClashProxy(inbound, fallbackLabel) {
       };
       if (protocol.transport === "tcp") proxy.flow = "xtls-rprx-vision";
     } else if (protocol.tlsMode === "cert") {
-      proxy.sni = form.handshakeHost;
+      proxy.servername = form.handshakeHost;
     }
     if (protocol.transport === "ws") {
       proxy.network = "ws";
@@ -142,6 +182,7 @@ function inboundToClashProxy(inbound, fallbackLabel) {
       port,
       password: form.password,
       sni: form.handshakeHost,
+      alpn: ["h3"],
     };
     if (form.upMbps) proxy.up = `${form.upMbps} Mbps`;
     if (form.downMbps) proxy.down = `${form.downMbps} Mbps`;
@@ -149,6 +190,7 @@ function inboundToClashProxy(inbound, fallbackLabel) {
       proxy.obfs = form.obfsType;
       proxy["obfs-password"] = form.obfsPassword;
     }
+    if (form.portJumpRange) proxy.ports = form.portJumpRange;
     return proxy;
   }
 
@@ -224,11 +266,13 @@ export function buildSingboxOutboundsExport(inbounds, label) {
     const protocol = getProtocol(inbound.protocolId);
     if (!protocol) return null;
     const { form, tag } = inbound;
+    const transport = buildOutboundTransport(protocol, form);
     const base = {
       type: protocol.family,
       tag: `${label}-${tag}`,
       server: form.endpointHost,
       server_port: Number(form.endpointPort),
+      ...(transport ? { transport } : {}),
     };
     if (protocol.family === "vless") {
       const out = { ...base, uuid: form.uuid };
