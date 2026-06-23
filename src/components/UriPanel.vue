@@ -48,7 +48,9 @@ function exportAs(format) {
               </button>
               <div v-if="exportOpen" class="export-popover">
                 <button class="export-item" @click="exportAs('txt')">URI 列表 (.txt)</button>
-                <button class="export-item" @click="exportAs('clash')">Clash (.yaml)</button>
+                <button class="export-item" @click="exportAs('clash')">
+                  Mihomo / Clash Meta (.yaml)
+                </button>
                 <button class="export-item" @click="exportAs('singbox')">
                   sing-box outbound (.json)
                 </button>
