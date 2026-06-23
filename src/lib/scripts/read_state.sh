@@ -60,3 +60,15 @@ else
   echo "missing_ss_or_netstat"
 fi
 echo 'NGP_LISTEN_END'
+
+echo 'NGP_SERVICE_LOG_BEGIN'
+if command -v journalctl >/dev/null 2>&1; then
+  ngp_root journalctl -u sing-box --no-pager -n 80 2>&1 || true
+elif command -v logread >/dev/null 2>&1; then
+  ngp_root logread 2>/dev/null | awk '/sing-box/ { print }' | tail -n 80 || true
+elif ngp_root test -f /var/log/messages; then
+  ngp_root_sh "grep 'sing-box' /var/log/messages 2>/dev/null | tail -n 80" || true
+else
+  echo "missing_service_log_backend"
+fi
+echo 'NGP_SERVICE_LOG_END'

@@ -46,6 +46,10 @@ export function parseReadStateOutput(rawOutput) {
   const scalars = parseScalars(text);
   const configRaw = extractBlock(text, "CONFIG");
   const metaRaw = extractBlock(text, "META");
+  const configCheckRaw = extractBlock(text, "CONFIG_CHECK");
+  const processRaw = extractBlock(text, "PROCESS");
+  const listenRaw = extractBlock(text, "LISTEN");
+  const serviceLogRaw = extractBlock(text, "SERVICE_LOG");
   const config = tryParseJson(configRaw);
   const meta = migrateMeta(tryParseJson(metaRaw));
 
@@ -69,6 +73,10 @@ export function parseReadStateOutput(rawOutput) {
     singboxVersion: scalars.SINGBOX_VERSION || "unknown",
     hostArch: scalars.HOST_ARCH || "",
     hostKernel: scalars.HOST_KERNEL || "",
+    configCheckRaw,
+    processRaw,
+    listenRaw,
+    serviceLogRaw,
     config,
     meta,
     foreignInbounds,

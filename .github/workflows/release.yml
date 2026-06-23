@@ -31,9 +31,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Forces the managed sing-box service to run `/etc/sing-box/config.json`.
-          - Adds node-side diagnostics for config checks, sing-box process args, and listening sockets.
-          - Helps distinguish service/config issues from firewall or client import issues.
+          - Adds `server_name` to generated VLESS Reality inbound TLS config.
+          - Fixes Reality clients failing with `reality verification failed`.
+          - Adds recent sing-box service logs to node-side diagnostics.
           NOTES
 
       - name: Publish release
