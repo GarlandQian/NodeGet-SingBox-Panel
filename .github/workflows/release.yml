@@ -31,9 +31,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Moved NodeGet metadata out of `/etc/sing-box` so Alpine/OpenRC no longer loads it as a sing-box config.
-          - Migrates and removes the legacy `/etc/sing-box/nodeget.json` metadata file before starting sing-box.
-          - Keeps release assets versioned with a single extension zip.
+          - Added sing-box outbound transport fields for WS, HTTP, gRPC, and HTTPUpgrade exports.
+          - Improved Mihomo/Clash export compatibility for VLESS TLS and Hysteria2.
+          - Added Hysteria2 `ports` export for port-jump configurations.
           NOTES
 
       - name: Publish release
