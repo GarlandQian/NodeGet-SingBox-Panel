@@ -189,6 +189,66 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function copyTextFallback(text) {
+  if (typeof document === "undefined" || !document.body) {
+    throw new Error("clipboard_unavailable");
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.width = "1px";
+  textarea.style.height = "1px";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  textarea.style.fontSize = "16px";
+
+  const selection = document.getSelection?.();
+  const selectedRange = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  const activeElement = document.activeElement;
+
+  document.body.appendChild(textarea);
+  try {
+    try {
+      textarea.focus({ preventScroll: true });
+    } catch {
+      textarea.focus();
+    }
+    textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
+    if (!document.execCommand?.("copy")) {
+      throw new Error("copy_command_failed");
+    }
+  } finally {
+    textarea.remove();
+    if (selection && selectedRange) {
+      selection.removeAllRanges();
+      selection.addRange(selectedRange);
+    }
+    try {
+      activeElement?.focus?.({ preventScroll: true });
+    } catch {
+      activeElement?.focus?.();
+    }
+  }
+}
+
+async function copyText(text) {
+  try {
+    copyTextFallback(text);
+    return;
+  } catch (fallbackError) {
+    if (!navigator.clipboard?.writeText || window.isSecureContext === false) {
+      throw fallbackError;
+    }
+  }
+
+  await navigator.clipboard.writeText(text);
+}
+
 function isAbort(error) {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -685,13 +745,23 @@ function applyRealityCandidate(candidate) {
 
 async function copyUri() {
   if (!connectionInfo.value?.uri) return;
-  await navigator.clipboard.writeText(connectionInfo.value.uri);
+  try {
+    await copyText(connectionInfo.value.uri);
+    commandError.value = "";
+  } catch (e) {
+    commandError.value = `复制失败：${errorMessage(e)}`;
+  }
 }
 
 async function copyAllUris() {
   if (!allShareUris.value.length) return;
   const text = allShareUris.value.map((row) => row.uri).join("\n");
-  await navigator.clipboard.writeText(text);
+  try {
+    await copyText(text);
+    commandError.value = "";
+  } catch (e) {
+    commandError.value = `复制失败：${errorMessage(e)}`;
+  }
 }
 
 function toggleBatchMode() {
