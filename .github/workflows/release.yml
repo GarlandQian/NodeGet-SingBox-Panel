@@ -31,10 +31,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Emits VLESS Reality share URLs in a more compatible TCP Reality format.
-          - Emits Mihomo / Clash Meta VLESS Reality proxies in the tested working YAML format.
-          - Adds explicit `network: tcp` for TCP VLESS YAML exports.
-          - Renames the YAML export menu item to avoid old Clash compatibility confusion.
+          - Fixes Safari clipboard copy fallback for URL and URI exports.
+          - Uses a textarea-based fallback before `navigator.clipboard` for better compatibility.
+          - Keeps copy errors visible in the UI instead of failing silently.
           NOTES
 
       - name: Publish release
