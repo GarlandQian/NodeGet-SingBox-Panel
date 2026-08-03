@@ -79,9 +79,10 @@ function buildTls(protocol, form) {
 }
 
 function buildTransport(protocol, form) {
-  if (!protocol.transport || protocol.transport === "tcp" || protocol.transport === "quic") {
+  if (!protocol.transport || protocol.transport === "tcp") {
     return null;
   }
+  if (protocol.transport === "quic") return { type: "quic" };
   if (protocol.transport === "ws") {
     return withDefined({
       type: "ws",
@@ -234,12 +235,19 @@ export function buildSingBoxInbound(protocolId, form) {
   throw new Error(`不支持的协议：${protocol.id}`);
 }
 
-export function buildSingBoxConfig({ inbounds, foreignInbounds = [] }) {
+export function buildSingBoxConfig({ inbounds, foreignInbounds = [], baseConfig = null }) {
+  const hasBaseConfig =
+    baseConfig && typeof baseConfig === "object" && !Array.isArray(baseConfig);
+  const base = hasBaseConfig
+    ? baseConfig
+    : {
+        log: { level: "info", timestamp: true },
+        outbounds: [{ type: "direct", tag: "direct" }],
+        route: { final: "direct" },
+      };
   return {
-    log: { level: "info", timestamp: true },
+    ...base,
     inbounds: [...foreignInbounds, ...inbounds],
-    outbounds: [{ type: "direct", tag: "direct" }],
-    route: { final: "direct" },
   };
 }
 

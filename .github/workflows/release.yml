@@ -23,6 +23,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Verify protocol generation
+        run: bun run test
+
       - name: Build extension package
         run: bun run package
 
@@ -31,9 +34,13 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Fixes Safari clipboard copy fallback for URL and URI exports.
-          - Uses a textarea-based fallback before `navigator.clipboard` for better compatibility.
-          - Keeps copy errors visible in the UI instead of failing silently.
+          - Generates VLESS Reality keypairs locally in the dashboard.
+          - Avoids remote `sing-box generate reality-keypair` execution during inbound creation.
+          - Fixes keypair generation failures after NodeGet 0.5.18 execute task timeout changes.
+          - Installs the official musl binary on Alpine instead of the incompatible release `.apk` path.
+          - Fixes VMess QUIC/TLS, Shadowsocks 2022 key sizes, transport URIs, and missing outbound fields.
+          - Preserves existing sing-box DNS, outbound, route, experimental, and service settings.
+          - Validates and backs up configuration before atomic deployment, with rollback on restart failure.
           NOTES
 
       - name: Publish release

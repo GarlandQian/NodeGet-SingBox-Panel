@@ -106,7 +106,7 @@ ngp_migrate_legacy_meta() {
     if ! ngp_root test -f "$meta_file"; then
       tmp="$(mktemp)"
       ngp_root cat "$legacy_meta_file" > "$tmp"
-      ngp_write_root_file "$tmp" "$meta_file" 0644
+      ngp_write_root_file "$tmp" "$meta_file" 0600
       rm -f "$tmp"
     fi
     ngp_root rm -f "$legacy_meta_file"
@@ -295,13 +295,19 @@ ngp_singbox_bin() {
   return 1
 }
 
+NGP_SERVICE_CREATED=0
+
 ngp_ensure_singbox_service() {
   manager="$(ngp_service_manager)"
   case "$manager" in
     systemd)
+      if ngp_root systemctl cat sing-box.service >/dev/null 2>&1; then
+        return
+      fi
       singbox_bin="$(ngp_singbox_bin)" || ngp_error "missing_sing-box"
       tmp="$(mktemp)"
       cat > "$tmp" <<EOF
+# Managed by NodeGet SingBox Panel
 [Unit]
 Description=sing-box service
 Documentation=https://sing-box.sagernet.org/
@@ -320,16 +326,21 @@ WantedBy=multi-user.target
 EOF
       ngp_write_root_file "$tmp" /etc/systemd/system/sing-box.service 0644
       rm -f "$tmp"
+      NGP_SERVICE_CREATED=1
       ngp_service_reload
       ;;
     service)
       return
       ;;
     openrc)
+      if ngp_root test -e /etc/init.d/sing-box; then
+        return
+      fi
       singbox_bin="$(ngp_singbox_bin)" || ngp_error "missing_sing-box"
       tmp="$(mktemp)"
       cat > "$tmp" <<EOF
 #!/sbin/openrc-run
+# Managed by NodeGet SingBox Panel
 description="sing-box service"
 command="$singbox_bin"
 command_args="run -c /etc/sing-box/config.json"
@@ -343,6 +354,7 @@ depend() {
 EOF
       ngp_write_root_file "$tmp" /etc/init.d/sing-box 0755
       rm -f "$tmp"
+      NGP_SERVICE_CREATED=1
       ;;
     *)
       ngp_error "unsupported_service_manager"
@@ -350,11 +362,77 @@ EOF
   esac
 }
 
+ngp_install_singbox_alpine() {
+  ngp_require_command curl curl
+  ngp_require_command tar tar
+
+  machine_arch="$(uname -m)"
+  case "$machine_arch" in
+    x86_64|amd64)
+      release_arch="amd64"
+      ;;
+    aarch64|arm64)
+      release_arch="arm64"
+      ;;
+    armv7l|armv7)
+      release_arch="armv7"
+      ;;
+    i386|i486|i586|i686|x86)
+      release_arch="386"
+      ;;
+    riscv64)
+      release_arch="riscv64"
+      ;;
+    loongarch64|loong64)
+      release_arch="loong64"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  latest_url="$(curl -fsSL --connect-timeout 5 --max-time 8 -o /dev/null -w '%{url_effective}' \
+    https://github.com/SagerNet/sing-box/releases/latest)" || return 1
+  release_tag="${latest_url##*/}"
+  case "$release_tag" in
+    v*)
+      release_version="${release_tag#v}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  archive_name="sing-box-${release_version}-linux-${release_arch}-musl.tar.gz"
+  archive_url="https://github.com/SagerNet/sing-box/releases/download/${release_tag}/${archive_name}"
+  work_dir="$(mktemp -d)"
+  if ! curl -fL --connect-timeout 8 --max-time 35 -o "$work_dir/$archive_name" "$archive_url"; then
+    rm -rf "$work_dir"
+    return 1
+  fi
+  if ! tar -xzf "$work_dir/$archive_name" -C "$work_dir"; then
+    rm -rf "$work_dir"
+    return 1
+  fi
+  extracted_bin="$(find "$work_dir" -type f -name sing-box | head -n 1)"
+  if [ -z "$extracted_bin" ] || [ ! -f "$extracted_bin" ]; then
+    rm -rf "$work_dir"
+    return 1
+  fi
+  ngp_write_root_file "$extracted_bin" /usr/local/bin/sing-box 0755
+  rm -rf "$work_dir"
+}
+
 ngp_ensure_singbox() {
   if ! ngp_singbox_bin >/dev/null 2>&1; then
-    ngp_require_command curl curl
-    install_status=0
-    ngp_root_sh 'curl -fsSL https://sing-box.app/install.sh | sh' || install_status=$?
+    install_status=1
+    if command -v apk >/dev/null 2>&1; then
+      ngp_install_singbox_alpine || install_status=$?
+    else
+      ngp_require_command curl curl
+      install_status=0
+      ngp_root_sh 'curl -fsSL https://sing-box.app/install.sh | sh' || install_status=$?
+    fi
     if ! ngp_singbox_bin >/dev/null 2>&1; then
       ngp_error "singbox_install_failed_$install_status"
     fi

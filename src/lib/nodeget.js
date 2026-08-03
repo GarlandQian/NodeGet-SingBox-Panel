@@ -3,7 +3,6 @@ import { WebSocketRPCClient } from "./wsRpcClient";
 import {
   buildControlScript,
   buildDeployScript,
-  buildGenerateRealityKeypairScript,
   buildPortJumpApplyScript,
   buildPortJumpRemoveScript,
   buildReadStateScript,
@@ -14,7 +13,6 @@ import {
   parseControlOutput,
   parseDeployOutput,
   parseReadStateOutput,
-  parseRpcKeypair,
 } from "./state";
 
 export function createNodegetClient() {
@@ -39,14 +37,6 @@ export async function listNodeNames(client, token, uuids) {
     }
   }
   return map;
-}
-
-function stripTruncation(output) {
-  return String(output || "")
-    .split("\n")
-    .filter((line) => !line.includes("Output truncated"))
-    .join("\n")
-    .trim();
 }
 
 class AbortError extends Error {
@@ -117,7 +107,7 @@ export async function runExecuteTask(
       return {
         taskId,
         record,
-        output: stripTruncation(record.task_event_result?.execute),
+        output: String(record.task_event_result?.execute || "").trim(),
       };
     }
     if (record.success === false) {
@@ -136,7 +126,17 @@ export async function readNodeState(client, token, uuid, options = {}) {
     timeoutMs: 60000,
     ...options,
   });
-  return { ...parseReadStateOutput(result.output), rawOutput: result.output };
+  const state = parseReadStateOutput(result.output);
+  if (state.outputTruncated) {
+    throw new Error("节点状态输出被 NodeGet 截断，已停止操作以避免覆盖现有配置");
+  }
+  if (state.configParseError) {
+    throw new Error("节点 sing-box 配置读回不完整或 JSON 无效，已停止操作");
+  }
+  if (state.metaParseError) {
+    throw new Error("NodeGet sing-box 元数据读回不完整或 JSON 无效，已停止操作");
+  }
+  return { ...state, rawOutput: result.output };
 }
 
 export async function deployNodeState(client, token, uuid, payload, options = {}) {
@@ -161,14 +161,6 @@ export async function uninstallSingbox(client, token, uuid, options = {}) {
     ...options,
   });
   return { rawOutput: result.output };
-}
-
-export async function generateRealityKeypair(client, token, uuid, options = {}) {
-  const result = await runShell(client, token, uuid, buildGenerateRealityKeypairScript(), {
-    timeoutMs: 60000,
-    ...options,
-  });
-  return { ...parseRpcKeypair(result.output), rawOutput: result.output };
 }
 
 export async function runRealityScan(client, token, uuid, params, options = {}) {
