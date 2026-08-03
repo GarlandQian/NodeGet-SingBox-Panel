@@ -6,6 +6,8 @@ const {
   protocol,
   commandRunning,
   commandError,
+  loadingState,
+  stateReady,
   isEditing,
   saveButtonLabel,
   connectionInfo,
@@ -50,7 +52,7 @@ function withClose(fn) {
       <button
         v-if="!batchMode"
         class="button primary"
-        :disabled="commandRunning"
+        :disabled="commandRunning || loadingState || !stateReady"
         @click="saveInbound"
       >
         {{ commandRunning ? "执行中..." : saveButtonLabel }}
@@ -94,7 +96,7 @@ function withClose(fn) {
               :disabled="batchMode || commandRunning"
               @click="withClose(uninstallAll)()"
             >
-              完全卸载 sing-box
+              移除面板配置
             </button>
           </div>
         </template>

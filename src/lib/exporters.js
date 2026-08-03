@@ -8,8 +8,11 @@ function compactObject(object) {
 }
 
 function buildOutboundTransport(protocol, form) {
-  if (!protocol.transport || protocol.transport === "tcp" || protocol.transport === "quic") {
+  if (!protocol.transport || protocol.transport === "tcp") {
     return null;
+  }
+  if (protocol.transport === "quic") {
+    return protocol.family === "vmess" ? { type: "quic" } : null;
   }
   if (protocol.transport === "ws") {
     return compactObject({
@@ -121,6 +124,18 @@ function inboundToClashProxy(inbound, fallbackLabel) {
       proxy["grpc-opts"] = { "grpc-service-name": form.serviceName || "" };
     } else if (protocol.transport === "http") {
       proxy.network = "h2";
+      proxy["h2-opts"] = {
+        path: form.path || "/",
+        host: form.transportHost ? [form.transportHost] : undefined,
+      };
+    } else if (protocol.transport === "httpupgrade") {
+      proxy.network = "httpupgrade";
+      proxy["http-opts"] = {
+        path: form.path || "/",
+        host: form.transportHost,
+      };
+    } else if (protocol.transport === "quic") {
+      proxy.network = "quic";
     }
     if (protocol.tlsMode === "cert" && form.handshakeHost) proxy.servername = form.handshakeHost;
     return proxy;
@@ -145,6 +160,18 @@ function inboundToClashProxy(inbound, fallbackLabel) {
     } else if (protocol.transport === "grpc") {
       proxy.network = "grpc";
       proxy["grpc-opts"] = { "grpc-service-name": form.serviceName || "" };
+    } else if (protocol.transport === "http") {
+      proxy.network = "h2";
+      proxy["h2-opts"] = {
+        path: form.path || "/",
+        host: form.transportHost ? [form.transportHost] : undefined,
+      };
+    } else if (protocol.transport === "httpupgrade") {
+      proxy.network = "httpupgrade";
+      proxy["http-opts"] = {
+        path: form.path || "/",
+        host: form.transportHost,
+      };
     }
     return proxy;
   }
@@ -204,6 +231,18 @@ function inboundToClashProxy(inbound, fallbackLabel) {
       password: form.password,
       sni: form.handshakeHost,
     };
+  }
+
+  if (protocol.family === "socks") {
+    return compactObject({
+      name,
+      type: "socks5",
+      server,
+      port,
+      username: form.username,
+      password: form.password,
+      udp: true,
+    });
   }
 
   return null;
@@ -324,8 +363,15 @@ export function buildSingboxOutboundsExport(inbounds, label) {
       };
     }
     if (protocol.family === "hysteria2") {
+      const portRanges = String(form.portJumpRange || "")
+        .split(",")
+        .map((range) => range.trim().replace(/^(\d+)-(\d+)$/, "$1:$2"))
+        .filter(Boolean);
+      const baseWithoutPort = { ...base };
+      delete baseWithoutPort.server_port;
       const out = {
-        ...base,
+        ...(portRanges.length ? baseWithoutPort : base),
+        ...(portRanges.length ? { server_ports: portRanges } : {}),
         password: form.password,
         tls: { enabled: true, server_name: form.handshakeHost, alpn: ["h3"] },
       };
@@ -341,6 +387,14 @@ export function buildSingboxOutboundsExport(inbounds, label) {
         ...base,
         password: form.password,
         tls: { enabled: true, server_name: form.handshakeHost },
+      };
+    }
+    if (protocol.family === "socks") {
+      return {
+        ...base,
+        version: "5",
+        ...(form.username ? { username: form.username } : {}),
+        ...(form.password ? { password: form.password } : {}),
       };
     }
     return null;

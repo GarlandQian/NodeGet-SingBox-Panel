@@ -51,15 +51,17 @@ export function parseReadStateOutput(rawOutput) {
   const listenRaw = extractBlock(text, "LISTEN");
   const serviceLogRaw = extractBlock(text, "SERVICE_LOG");
   const config = tryParseJson(configRaw);
-  const meta = migrateMeta(tryParseJson(metaRaw));
+  const parsedMeta = tryParseJson(metaRaw);
+  const meta = migrateMeta(parsedMeta);
+  const outputTruncated = /\[\.\.\. Output truncated,/.test(text);
+  const configParseError = Boolean(configRaw.trim()) && config == null;
+  const metaParseError = Boolean(metaRaw.trim()) && parsedMeta == null;
 
   const allInbounds = Array.isArray(config?.inbounds) ? config.inbounds : [];
   const managedTags = new Set(
     (meta.inbounds || []).map((entry) => entry.tag).filter(Boolean),
   );
-  const foreignInbounds = allInbounds.filter(
-    (inbound) => !managedTags.has(inbound?.tag) && !isNodegetTag(inbound?.tag),
-  );
+  const foreignInbounds = allInbounds.filter((inbound) => !managedTags.has(inbound?.tag));
   const orphanManagedInbounds = allInbounds.filter(
     (inbound) => !managedTags.has(inbound?.tag) && isNodegetTag(inbound?.tag),
   );
@@ -77,6 +79,11 @@ export function parseReadStateOutput(rawOutput) {
     processRaw,
     listenRaw,
     serviceLogRaw,
+    outputTruncated,
+    configParseError,
+    metaParseError,
+    configRaw,
+    metaRaw,
     config,
     meta,
     foreignInbounds,
@@ -122,14 +129,6 @@ function migrateLegacyMetaEntry(legacy) {
     },
     createdAt: Date.now(),
     updatedAt: Date.now(),
-  };
-}
-
-export function parseRpcKeypair(rawOutput) {
-  const scalars = parseScalars(rawOutput);
-  return {
-    privateKey: scalars.REALITY_PRIVATE_KEY || "",
-    publicKey: scalars.REALITY_PUBLIC_KEY || "",
   };
 }
 

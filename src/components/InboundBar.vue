@@ -76,7 +76,7 @@ function endpointLabel(entry) {
       </div>
     </div>
     <div v-if="foreignInbounds.length" class="inbound-foreign">
-      检测到 {{ foreignInbounds.length }} 个非 nodeget 管理的入站，将原样保留。
+      检测到 {{ foreignInbounds.length }} 个面板未管理的入站，将原样保留。
     </div>
     <div v-if="stateError" class="empty">{{ stateError }}</div>
   </div>

@@ -3,7 +3,6 @@ import readStateScript from "./scripts/read_state.sh?raw";
 import deployScript from "./scripts/deploy.sh?raw";
 import controlScript from "./scripts/control.sh?raw";
 import uninstallScript from "./scripts/uninstall.sh?raw";
-import generateRealityKeypairScript from "./scripts/generate_reality_keypair.sh?raw";
 import realityScanScript from "./scripts/reality_scan.sh?raw";
 import portjumpApplyScript from "./scripts/portjump_apply.sh?raw";
 import portjumpRemoveScript from "./scripts/portjump_remove.sh?raw";
@@ -54,10 +53,6 @@ export function buildControlScript(action) {
 
 export function buildUninstallScript() {
   return assemble({}, uninstallScript);
-}
-
-export function buildGenerateRealityKeypairScript() {
-  return assemble({}, generateRealityKeypairScript);
 }
 
 export function buildRealityScanScript({

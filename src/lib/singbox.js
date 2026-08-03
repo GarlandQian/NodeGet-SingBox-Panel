@@ -14,6 +14,16 @@ export function randomBase64(byteLength = 16) {
   return btoa(bin);
 }
 
+export function shadowsocksPasswordBytes(method) {
+  if (
+    method === "2022-blake3-aes-256-gcm" ||
+    method === "2022-blake3-chacha20-poly1305"
+  ) {
+    return 32;
+  }
+  return 16;
+}
+
 export function formatHostPort(host, port) {
   const normalizedHost = String(host || "").trim();
   const normalizedPort = String(port || "").trim();
@@ -81,6 +91,7 @@ function buildVlessUri(protocol, form, label) {
 }
 
 function buildVmessUri(protocol, form, label) {
+  const hostTransports = new Set(["ws", "http", "httpupgrade"]);
   const payload = {
     v: "2",
     ps: label,
@@ -91,8 +102,13 @@ function buildVmessUri(protocol, form, label) {
     scy: "auto",
     net: protocol.transport === "tcp" ? "tcp" : protocol.transport,
     type: "none",
-    host: form.transportHost || "",
-    path: form.serviceName || form.path || "",
+    host: hostTransports.has(protocol.transport) ? form.transportHost || "" : "",
+    path:
+      protocol.transport === "grpc"
+        ? form.serviceName || ""
+        : hostTransports.has(protocol.transport)
+          ? form.path || "/"
+          : "",
     tls: protocol.tlsMode === "cert" ? "tls" : "",
     sni: protocol.tlsMode === "cert" ? shareHost(form) : "",
   };
@@ -105,6 +121,8 @@ function buildTrojanUri(protocol, form, label) {
     params.set("security", "tls");
     params.set("sni", shareHost(form));
   }
+  params.set("type", protocol.transport === "tcp" ? "tcp" : protocol.transport);
+  if (protocol.transport === "tcp") params.set("headerType", "none");
   appendTransportParams(params, protocol, form);
   return `trojan://${encodeURIComponent(form.password)}@${formatHostPort(form.endpointHost, form.endpointPort)}?${params.toString()}#${encodeURIComponent(label)}`;
 }

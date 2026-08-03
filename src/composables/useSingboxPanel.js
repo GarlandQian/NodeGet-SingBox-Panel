@@ -1,5 +1,11 @@
 import { computed, reactive, ref, watch } from "vue";
-import { buildConnectionDetails, buildShareUri, randomBase64, randomHex } from "@/lib/singbox";
+import {
+  buildConnectionDetails,
+  buildShareUri,
+  randomBase64,
+  randomHex,
+  shadowsocksPasswordBytes,
+} from "@/lib/singbox";
 import { getProtocol } from "@/lib/protocols";
 import { parseExtensionContext } from "@/lib/context";
 import {
@@ -11,13 +17,13 @@ import {
 } from "@/lib/inbound";
 import { makeMeta } from "@/lib/state";
 import { normalizeRealityDomain, parseRealityTargetOutput } from "@/lib/realityTools";
+import { generateLocalRealityKeypair } from "@/lib/realityKeypair";
 import { canonicalPortJumpRange, parsePortJumpRange, toIptablesMultiportSpec } from "@/lib/portJump";
 import {
   applyPortJump,
   controlSingboxService,
   createNodegetClient,
   deployNodeState,
-  generateRealityKeypair,
   listNodeNames,
   listNodeUuids,
   readNodeState,
@@ -77,12 +83,14 @@ const loadingNodes = ref(false);
 const nodeError = ref("");
 
 const loadingState = ref(false);
+const stateReady = ref(false);
 const stateError = ref("");
 const serviceActive = ref("unknown");
 const serviceEnabled = ref("unknown");
 const singboxVersion = ref("");
 const inbounds = ref([]);
 const foreignInbounds = ref([]);
+const baseConfig = ref(null);
 
 const selectedInboundId = ref(null);
 const selectedProtocolId = ref("vless-reality");
@@ -319,7 +327,7 @@ function regenSecret() {
     return;
   }
   if (family === "shadowsocks") {
-    form.password = randomBase64(form.method?.includes("256") ? 32 : 16);
+    form.password = randomBase64(shadowsocksPasswordBytes(form.method));
     return;
   }
   if (family === "tuic") {
@@ -368,6 +376,7 @@ async function refreshState() {
   }
   const ctrl = newAbortController();
   loadingState.value = true;
+  stateReady.value = false;
   stateError.value = "";
   try {
     const state = await readNodeState(client, token, selectedUuid.value, {
@@ -376,8 +385,10 @@ async function refreshState() {
     serviceActive.value = state.serviceActive;
     serviceEnabled.value = state.serviceEnabled;
     singboxVersion.value = state.singboxVersion;
+    baseConfig.value = state.config;
     foreignInbounds.value = state.foreignInbounds;
     inbounds.value = state.meta.inbounds || [];
+    stateReady.value = true;
     if (
       selectedInboundId.value != null &&
       !inbounds.value.find((it) => it.id === selectedInboundId.value)
@@ -387,6 +398,7 @@ async function refreshState() {
     pushRun("read-state", true, state.rawOutput);
   } catch (e) {
     if (isAbort(e)) return;
+    stateReady.value = false;
     stateError.value = errorMessage(e);
     pushRun("read-state", false, errorMessage(e));
   } finally {
@@ -480,12 +492,10 @@ async function syncPortJump(token, uuid, ctrl, before, after) {
   }
 }
 
-async function ensureRealityKeypair(token, uuid, ctrl) {
+async function ensureRealityKeypair() {
   if (protocol.value?.tlsMode !== "reality") return;
   if (form.privateKey && form.publicKey) return;
-  const result = await generateRealityKeypair(client, token, uuid, {
-    signal: ctrl.signal,
-  });
+  const result = generateLocalRealityKeypair();
   if (!result.privateKey || !result.publicKey) {
     throw new Error("生成 Reality 密钥失败");
   }
@@ -527,6 +537,7 @@ function buildPayload({ replaceId = null, dropId = null } = {}) {
   const config = buildSingBoxConfig({
     inbounds: sbInbounds,
     foreignInbounds: foreignInbounds.value,
+    baseConfig: baseConfig.value,
   });
   const meta = makeMeta(next);
   return { config, meta, nextInbounds: next };
@@ -534,6 +545,10 @@ function buildPayload({ replaceId = null, dropId = null } = {}) {
 
 async function saveInbound() {
   commandError.value = "";
+  if (!stateReady.value) {
+    commandError.value = "请先成功读取节点状态，避免覆盖现有配置";
+    return;
+  }
   let token;
   let uuid;
   try {
@@ -562,7 +577,7 @@ async function saveInbound() {
   const ctrl = newAbortController();
   commandRunning.value = true;
   try {
-    await ensureRealityKeypair(token, uuid, ctrl);
+    await ensureRealityKeypair();
     const replaceId = isEditing.value ? selectedInboundId.value : null;
     const { config, meta, nextInbounds } = buildPayload({ replaceId });
     const result = await deployNodeState(
@@ -573,6 +588,7 @@ async function saveInbound() {
       { signal: ctrl.signal },
     );
     await syncPortJump(token, uuid, ctrl, before, nextInbounds);
+    baseConfig.value = config;
     inbounds.value = nextInbounds;
     serviceActive.value = result.serviceActive;
     if (!isEditing.value) {
@@ -596,6 +612,10 @@ async function saveInbound() {
 
 async function deleteInbound() {
   commandError.value = "";
+  if (!stateReady.value) {
+    commandError.value = "请先成功读取节点状态，避免覆盖现有配置";
+    return;
+  }
   if (selectedInboundId.value == null) {
     commandError.value = "没有选中的入站";
     return;
@@ -623,6 +643,7 @@ async function deleteInbound() {
       { signal: ctrl.signal },
     );
     await syncPortJump(token, uuid, ctrl, before, nextInbounds);
+    baseConfig.value = config;
     inbounds.value = nextInbounds;
     serviceActive.value = result.serviceActive;
     selectInbound(null);
@@ -668,8 +689,15 @@ async function controlAction(action) {
 }
 
 async function uninstallAll() {
-  if (typeof window !== "undefined" && !window.confirm("确认从该节点完全卸载 sing-box 配置？此操作不可撤销。")) return;
+  if (
+    typeof window !== "undefined" &&
+    !window.confirm("确认移除面板管理的入站和端口跳跃？其他 sing-box 配置、程序和服务将保留。")
+  ) return;
   commandError.value = "";
+  if (!stateReady.value) {
+    commandError.value = "请先成功读取节点状态，避免覆盖现有配置";
+    return;
+  }
   let token;
   let uuid;
   try {
@@ -682,12 +710,30 @@ async function uninstallAll() {
   const ctrl = newAbortController();
   commandRunning.value = true;
   try {
+    const before = inbounds.value.slice();
+    let rawOutput = "";
+    if (before.length) {
+      const config = buildSingBoxConfig({
+        inbounds: [],
+        foreignInbounds: foreignInbounds.value,
+        baseConfig: baseConfig.value,
+      });
+      const deployResult = await deployNodeState(
+        client,
+        token,
+        uuid,
+        { config, meta: makeMeta([]) },
+        { signal: ctrl.signal },
+      );
+      await syncPortJump(token, uuid, ctrl, before, []);
+      baseConfig.value = config;
+      serviceActive.value = deployResult.serviceActive;
+      rawOutput = deployResult.rawOutput;
+    }
     const result = await uninstallSingbox(client, token, uuid, { signal: ctrl.signal });
     inbounds.value = [];
-    foreignInbounds.value = [];
-    serviceActive.value = "inactive";
     selectInbound(null);
-    pushRun("uninstall", true, result.rawOutput);
+    pushRun("uninstall", true, [rawOutput, result.rawOutput].filter(Boolean).join("\n"));
   } catch (e) {
     if (isAbort(e)) return;
     commandError.value = errorMessage(e);
@@ -823,6 +869,7 @@ function mergeInboundIntoState(formSnapshot, protocolId, state) {
   const config = buildSingBoxConfig({
     inbounds: sbInbounds,
     foreignInbounds: state.foreignInbounds || [],
+    baseConfig: state.config,
   });
   const meta = makeMeta(next);
   return { config, meta, nextInbounds: next };
@@ -857,10 +904,7 @@ async function batchDeploy() {
       batchProgress.value = batchProgress.value.map((row, idx) =>
         idx === 0 ? { ...row, status: "keypair" } : row,
       );
-      const keypairFrom = targets[0];
-      const result = await generateRealityKeypair(client, token, keypairFrom, {
-        signal: ctrl.signal,
-      });
+      const result = generateLocalRealityKeypair();
       if (!result.privateKey || !result.publicKey) throw new Error("生成 Reality 密钥失败");
       form.privateKey = result.privateKey;
       form.publicKey = result.publicKey;
@@ -960,6 +1004,10 @@ function downloadExport(formatId) {
 
 function watchNode() {
   watch(selectedUuid, () => {
+    stateReady.value = false;
+    baseConfig.value = null;
+    foreignInbounds.value = [];
+    inbounds.value = [];
     selectInbound(null);
     refreshState();
   });
@@ -967,7 +1015,7 @@ function watchNode() {
     () => form.method,
     () => {
       if (protocol.value?.family === "shadowsocks") {
-        form.password = randomBase64(form.method?.includes("256") ? 32 : 16);
+        form.password = randomBase64(shadowsocksPasswordBytes(form.method));
       }
     },
   );
@@ -1004,6 +1052,7 @@ export function useSingboxPanel() {
     loadingNodes,
     nodeError,
     loadingState,
+    stateReady,
     stateError,
     serviceActive,
     serviceEnabled,

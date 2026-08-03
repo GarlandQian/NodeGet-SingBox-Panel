@@ -11,6 +11,9 @@ const {
   refreshNodes,
   singboxVersion,
   serviceActive,
+  commandRunning,
+  batchRunning,
+  realityRunning,
   batchMode,
   isBatchTarget,
   toggleBatchTarget,
@@ -19,6 +22,7 @@ const {
 } = useSingboxPanel();
 
 function onNodeClick(uuid) {
+  if (commandRunning.value || batchRunning.value || realityRunning.value) return;
   if (batchMode.value) {
     toggleBatchTarget(uuid);
     return;
@@ -42,7 +46,7 @@ function displayName(uuid) {
       />
       <button
         class="icon-button"
-        :disabled="loadingNodes"
+        :disabled="loadingNodes || commandRunning || batchRunning || realityRunning"
         :title="loadingNodes ? '刷新中' : '刷新节点'"
         @click="refreshNodes"
       >
@@ -71,6 +75,7 @@ function displayName(uuid) {
           'is-batch': batchMode && isBatchTarget(uuid),
         }"
         :title="uuid"
+        :disabled="commandRunning || batchRunning || realityRunning"
         @click="onNodeClick(uuid)"
       >
         <span

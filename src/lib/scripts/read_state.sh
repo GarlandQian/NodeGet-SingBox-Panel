@@ -15,7 +15,6 @@ printf 'NGP_SERVICE_ENABLED=%s\n' "$(ngp_service_enabled sing-box)"
 printf 'NGP_SERVICE_MANAGER=%s\n' "$(ngp_service_manager)"
 printf 'NGP_HOST_ARCH=%s\n' "$(uname -m)"
 printf 'NGP_HOST_KERNEL=%s\n' "$(uname -r)"
-ngp_migrate_legacy_meta "$META_FILE" "$LEGACY_META_FILE"
 
 echo 'NGP_CONFIG_BEGIN'
 if ngp_root test -f "$CONFIG_FILE"; then
@@ -44,10 +43,10 @@ fi
 echo 'NGP_CONFIG_CHECK_END'
 
 echo 'NGP_PROCESS_BEGIN'
-if ps -eo pid,args >/dev/null 2>&1; then
-  ps -eo pid,args | awk '/[s]ing-box/ { print }' || true
+if ps -eo pid=,comm=,args= >/dev/null 2>&1; then
+  ps -eo pid=,comm=,args= | awk '$2 == "sing-box" { print }' || true
 else
-  ps | awk '/[s]ing-box/ { print }' || true
+  ps | awk '/[s]ing-box/ && !/[s]h -c/ { print }' || true
 fi
 echo 'NGP_PROCESS_END'
 
@@ -63,11 +62,11 @@ echo 'NGP_LISTEN_END'
 
 echo 'NGP_SERVICE_LOG_BEGIN'
 if command -v journalctl >/dev/null 2>&1; then
-  ngp_root journalctl -u sing-box --no-pager -n 80 2>&1 || true
+  ngp_root journalctl -u sing-box --no-pager -n 20 2>&1 || true
 elif command -v logread >/dev/null 2>&1; then
-  ngp_root logread 2>/dev/null | awk '/sing-box/ { print }' | tail -n 80 || true
+  ngp_root logread 2>/dev/null | awk '/sing-box/ { print }' | tail -n 20 || true
 elif ngp_root test -f /var/log/messages; then
-  ngp_root_sh "grep 'sing-box' /var/log/messages 2>/dev/null | tail -n 80" || true
+  ngp_root_sh "grep 'sing-box' /var/log/messages 2>/dev/null | tail -n 20" || true
 else
   echo "missing_service_log_backend"
 fi
