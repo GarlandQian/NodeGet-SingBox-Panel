@@ -42,7 +42,7 @@ function endpointLabel(entry) {
         <button
           class="button small"
           :disabled="!selectedUuid || loadingState"
-          @click="refreshState"
+          @click="refreshState({ feedback: true })"
         >
           {{ loadingState ? "读取中..." : "重新读取" }}
         </button>

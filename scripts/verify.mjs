@@ -11,6 +11,7 @@ import {
 } from "../src/lib/exporters.js";
 import { PROTOCOLS } from "../src/lib/protocols.js";
 import { generateLocalRealityKeypair } from "../src/lib/realityKeypair.js";
+import { readNodeIpAddresses, runExecuteTask } from "../src/lib/nodeget.js";
 import {
   buildShareUri,
   shadowsocksPasswordBytes,
@@ -43,6 +44,40 @@ function makeForm(protocol, index = 0) {
   };
 }
 
+function mockTaskClient(taskEventResult) {
+  const calls = [];
+  return {
+    calls,
+    async rpc(method, params) {
+      calls.push({ method, params });
+      if (method === "task_create_task") return { id: 42 };
+      if (method === "task_query") {
+        return [{ success: true, task_event_result: taskEventResult }];
+      }
+      throw new Error(`unexpected RPC method: ${method}`);
+    },
+  };
+}
+
+const ipTaskClient = mockTaskClient({ ip: ["198.51.100.8", "2001:db8::8"] });
+const nodeAddresses = await readNodeIpAddresses(ipTaskClient, "token", "uuid", {
+  pollIntervalMs: 0,
+  timeoutMs: 100,
+});
+assert.deepEqual(nodeAddresses, { ipv4: "198.51.100.8", ipv6: "2001:db8::8" });
+assert.equal(ipTaskClient.calls[0].params.task_type, "ip");
+assert.deepEqual(ipTaskClient.calls[1].params.task_data_query.condition, [
+  { task_id: 42 },
+  { type: "ip" },
+]);
+
+const executeTaskClient = mockTaskClient({ execute: "ok\n" });
+const executeResult = await runExecuteTask(executeTaskClient, "token", "uuid", "true", [], {
+  pollIntervalMs: 0,
+  timeoutMs: 100,
+});
+assert.equal(executeResult.output, "ok");
+
 for (let index = 0; index < 20; index += 1) {
   const pair = generateLocalRealityKeypair();
   const privateBytes = decodeBase64Url(pair.privateKey);
@@ -61,7 +96,9 @@ for (const [index, protocol] of PROTOCOLS.entries()) {
   const form = makeForm(protocol, index);
   const generatedInbound = buildSingBoxInbound(protocol.id, form);
   assert.equal(generatedInbound.tag, `nodeget-${protocol.id}-${form.endpointPort}`);
-  assert.ok(buildShareUri(protocol.id, form, "test"), `missing URI for ${protocol.id}`);
+  const shareUri = buildShareUri(protocol.id, form, "test");
+  assert.ok(shareUri, `missing URI for ${protocol.id}`);
+  if (protocol.id === "socks") assert.match(shareUri, /^socks5:\/\//);
 
   const entry = {
     id: String(index),

@@ -68,13 +68,13 @@ function sleep(ms, signal) {
   });
 }
 
-export async function runExecuteTask(
+async function runAgentTask(
   client,
   token,
   targetUuid,
-  command,
-  args = [],
-  { timeoutMs = 240000, pollIntervalMs = 1200, signal } = {},
+  taskType,
+  resultType,
+  { timeoutMs = 240000, pollIntervalMs = 1200, signal, errorLabel = resultType } = {},
 ) {
   if (signal?.aborted) throw new AbortError();
 
@@ -83,7 +83,7 @@ export async function runExecuteTask(
     {
       token,
       target_uuid: targetUuid,
-      task_type: { execute: { cmd: command, args } },
+      task_type: taskType,
     },
     15000,
   );
@@ -97,24 +97,56 @@ export async function runExecuteTask(
       "task_query",
       {
         token,
-        task_data_query: { condition: [{ task_id: taskId }, { type: "execute" }] },
+        task_data_query: { condition: [{ task_id: taskId }, { type: resultType }] },
       },
       15000,
     );
     const record = Array.isArray(rows) ? rows[0] : null;
     if (!record) continue;
     if (record.success === true) {
-      return {
-        taskId,
-        record,
-        output: String(record.task_event_result?.execute || "").trim(),
-      };
+      return { taskId, record };
     }
     if (record.success === false) {
-      throw new Error(record.error_message || `execute failed: ${command}`);
+      throw new Error(record.error_message || `${resultType} failed: ${errorLabel}`);
     }
   }
-  throw new Error(`execute timeout: ${command}`);
+  throw new Error(`${resultType} timeout: ${errorLabel}`);
+}
+
+export async function runExecuteTask(
+  client,
+  token,
+  targetUuid,
+  command,
+  args = [],
+  options = {},
+) {
+  const result = await runAgentTask(
+    client,
+    token,
+    targetUuid,
+    { execute: { cmd: command, args } },
+    "execute",
+    { ...options, errorLabel: command },
+  );
+  return {
+    ...result,
+    output: String(result.record.task_event_result?.execute || "").trim(),
+  };
+}
+
+export async function readNodeIpAddresses(client, token, uuid, options = {}) {
+  const result = await runAgentTask(client, token, uuid, "ip", "ip", {
+    timeoutMs: 30000,
+    ...options,
+    errorLabel: "node IP",
+  });
+  const addresses = result.record.task_event_result?.ip;
+  const normalize = (value) => (typeof value === "string" ? value.trim() : "");
+  return {
+    ipv4: normalize(Array.isArray(addresses) ? addresses[0] : ""),
+    ipv6: normalize(Array.isArray(addresses) ? addresses[1] : ""),
+  };
 }
 
 async function runShell(client, token, uuid, script, options = {}) {

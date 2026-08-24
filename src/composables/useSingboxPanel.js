@@ -26,6 +26,7 @@ import {
   deployNodeState,
   listNodeNames,
   listNodeUuids,
+  readNodeIpAddresses,
   readNodeState,
   removePortJumpUnits,
   runRealityScan,
@@ -77,6 +78,7 @@ const activeTab = ref("inbound");
 
 const nodes = ref([]);
 const nodeNameMap = ref({});
+const nodeAddressMap = ref({});
 const selectedUuid = ref(initialContext.node || "");
 const search = ref("");
 const loadingNodes = ref(false);
@@ -98,6 +100,7 @@ const form = reactive(emptyInboundForm());
 
 const commandRunning = ref(false);
 const commandError = ref("");
+const notification = ref(null);
 const recentRuns = ref(loadHistory());
 const historyFilter = ref("all");
 
@@ -122,6 +125,32 @@ const realityResult = ref(null);
 const validation = useFormValidation();
 
 let pendingAbort = null;
+let notificationTimer = null;
+let notificationSequence = 0;
+
+function dismissNotification() {
+  if (notificationTimer) clearTimeout(notificationTimer);
+  notificationTimer = null;
+  notification.value = null;
+}
+
+function showNotification(message, tone = "success", duration = 3000) {
+  const normalized = String(message || "").trim();
+  if (!normalized) return;
+  if (notificationTimer) clearTimeout(notificationTimer);
+  const id = ++notificationSequence;
+  notification.value = { id, message: normalized, tone };
+  notificationTimer = setTimeout(() => {
+    if (notification.value?.id === id) notification.value = null;
+    notificationTimer = null;
+  }, duration);
+}
+
+function reportCommandFailure(message) {
+  commandError.value = message;
+  showNotification(message, "error", 4500);
+}
+
 function abortInFlight() {
   pendingAbort?.abort?.();
   pendingAbort = null;
@@ -186,6 +215,7 @@ function pushRun(action, ok, output, extra = {}) {
 function clearHistory() {
   recentRuns.value = [];
   saveHistory([]);
+  showNotification("操作日志已清空");
 }
 
 const filteredHistory = computed(() => {
@@ -292,11 +322,22 @@ function selectProtocol(id) {
   }
 }
 
+async function resolveNodeAddress(token, uuid, options = {}) {
+  const cached = nodeAddressMap.value[uuid];
+  if (cached) return cached;
+  const { ipv4, ipv6 } = await readNodeIpAddresses(client, token, uuid, options);
+  const address = ipv4 || ipv6;
+  if (!address) throw new Error("节点未返回可用的 IPv4 或 IPv6");
+  nodeAddressMap.value = { ...nodeAddressMap.value, [uuid]: address };
+  return address;
+}
+
 function selectInbound(id) {
   selectedInboundId.value = id;
   validation.reset();
   if (id == null) {
     Object.assign(form, emptyInboundForm(), {
+      endpointHost: nodeAddressMap.value[selectedUuid.value] || "",
       uuid: crypto.randomUUID(),
       shortId: randomHex(8),
       password: randomBase64(16),
@@ -320,33 +361,42 @@ function regenSecret() {
       form.privateKey = "";
       form.publicKey = "";
     }
+    showNotification(
+      protocol.value?.tlsMode === "reality" ? "UUID 和 Reality 参数已更新" : "UUID 已更新",
+    );
     return;
   }
   if (family === "trojan" || family === "hysteria2" || family === "anytls") {
     form.password = randomBase64(16);
+    showNotification("密码已更新");
     return;
   }
   if (family === "shadowsocks") {
     form.password = randomBase64(shadowsocksPasswordBytes(form.method));
+    showNotification("密码已更新");
     return;
   }
   if (family === "tuic") {
     form.uuid = crypto.randomUUID();
     form.password = randomBase64(16);
+    showNotification("UUID 和密码已更新");
     return;
   }
   if (family === "socks") {
     form.username = "nodeget";
     form.password = randomBase64(12);
+    showNotification("SOCKS 用户信息已更新");
   }
 }
 
-async function refreshNodes() {
+async function refreshNodes(options = {}) {
+  const feedback = options?.feedback === true;
   let token;
   try {
     token = requireToken();
   } catch (e) {
     nodeError.value = errorMessage(e);
+    if (feedback) showNotification(nodeError.value, "error", 4500);
     return;
   }
   loadingNodes.value = true;
@@ -358,28 +408,36 @@ async function refreshNodes() {
     if (!uuids.includes(selectedUuid.value) && uuids.length > 0) {
       selectedUuid.value = uuids[0];
     }
+    if (feedback) showNotification(`节点列表已刷新，共 ${uuids.length} 个节点`);
   } catch (e) {
     nodeError.value = errorMessage(e);
+    if (feedback) showNotification(`刷新失败：${nodeError.value}`, "error", 4500);
   } finally {
     loadingNodes.value = false;
   }
 }
 
-async function refreshState() {
-  if (!selectedUuid.value) return;
+async function refreshState(options = {}) {
+  const feedback = options?.feedback === true;
+  if (!selectedUuid.value) {
+    if (feedback) showNotification("请先选择节点", "error", 4500);
+    return;
+  }
   let token;
   try {
     token = requireToken();
   } catch (e) {
     stateError.value = errorMessage(e);
+    if (feedback) showNotification(stateError.value, "error", 4500);
     return;
   }
+  const uuid = selectedUuid.value;
   const ctrl = newAbortController();
   loadingState.value = true;
   stateReady.value = false;
   stateError.value = "";
   try {
-    const state = await readNodeState(client, token, selectedUuid.value, {
+    const state = await readNodeState(client, token, uuid, {
       signal: ctrl.signal,
     });
     serviceActive.value = state.serviceActive;
@@ -395,12 +453,46 @@ async function refreshState() {
     ) {
       selectInbound(null);
     }
+
+    let appliedAddress = "";
+    let addressError = "";
+    if (selectedInboundId.value == null && !String(form.endpointHost || "").trim()) {
+      try {
+        const address = await resolveNodeAddress(token, uuid, { signal: ctrl.signal });
+        if (
+          selectedUuid.value === uuid &&
+          selectedInboundId.value == null &&
+          !String(form.endpointHost || "").trim()
+        ) {
+          form.endpointHost = address;
+          validation.validateField(form, selectedProtocolId.value, "endpointHost");
+          appliedAddress = address;
+        }
+      } catch (e) {
+        if (isAbort(e)) return;
+        addressError = errorMessage(e);
+      }
+    }
+
     pushRun("read-state", true, state.rawOutput);
+    if (appliedAddress) {
+      showNotification(`已自动填入节点 IP：${appliedAddress}`);
+    } else if (
+      addressError &&
+      selectedUuid.value === uuid &&
+      selectedInboundId.value == null &&
+      !String(form.endpointHost || "").trim()
+    ) {
+      showNotification(`未能自动获取节点 IP，请手动填写：${addressError}`, "warning", 5000);
+    } else if (feedback) {
+      showNotification("节点状态已重新读取");
+    }
   } catch (e) {
     if (isAbort(e)) return;
     stateReady.value = false;
     stateError.value = errorMessage(e);
     pushRun("read-state", false, errorMessage(e));
+    if (feedback) showNotification(`读取失败：${stateError.value}`, "error", 4500);
   } finally {
     if (pendingAbort === ctrl) pendingAbort = null;
     loadingState.value = false;
@@ -546,7 +638,7 @@ function buildPayload({ replaceId = null, dropId = null } = {}) {
 async function saveInbound() {
   commandError.value = "";
   if (!stateReady.value) {
-    commandError.value = "请先成功读取节点状态，避免覆盖现有配置";
+    reportCommandFailure("请先成功读取节点状态，避免覆盖现有配置");
     return;
   }
   let token;
@@ -555,11 +647,11 @@ async function saveInbound() {
     token = requireToken();
     uuid = requireSelectedUuid();
   } catch (e) {
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     return;
   }
   if (!validation.validateAll(form, selectedProtocolId.value)) {
-    commandError.value = "请修正表单错误";
+    reportCommandFailure("请修正表单错误");
     return;
   }
 
@@ -569,10 +661,11 @@ async function saveInbound() {
     const normalized = validatePortJumpForm(form, selectedProtocolId.value, portPort);
     if (normalized != null) form.portJumpRange = normalized;
   } catch (e) {
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     return;
   }
 
+  const action = isEditing.value ? "update-inbound" : "add-inbound";
   const before = inbounds.value.slice();
   const ctrl = newAbortController();
   commandRunning.value = true;
@@ -595,15 +688,12 @@ async function saveInbound() {
       const newest = nextInbounds[nextInbounds.length - 1];
       if (newest) selectedInboundId.value = newest.id;
     }
-    pushRun(isEditing.value ? "update-inbound" : "add-inbound", true, result.rawOutput);
+    pushRun(action, true, result.rawOutput);
+    showNotification(action === "update-inbound" ? "入站修改已保存" : "入站已添加");
   } catch (e) {
     if (isAbort(e)) return;
-    commandError.value = errorMessage(e);
-    pushRun(
-      isEditing.value ? "update-inbound" : "add-inbound",
-      false,
-      errorMessage(e),
-    );
+    reportCommandFailure(errorMessage(e));
+    pushRun(action, false, errorMessage(e));
   } finally {
     if (pendingAbort === ctrl) pendingAbort = null;
     commandRunning.value = false;
@@ -613,11 +703,11 @@ async function saveInbound() {
 async function deleteInbound() {
   commandError.value = "";
   if (!stateReady.value) {
-    commandError.value = "请先成功读取节点状态，避免覆盖现有配置";
+    reportCommandFailure("请先成功读取节点状态，避免覆盖现有配置");
     return;
   }
   if (selectedInboundId.value == null) {
-    commandError.value = "没有选中的入站";
+    reportCommandFailure("没有选中的入站");
     return;
   }
   let token;
@@ -626,7 +716,7 @@ async function deleteInbound() {
     token = requireToken();
     uuid = requireSelectedUuid();
   } catch (e) {
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     return;
   }
   const dropId = selectedInboundId.value;
@@ -648,9 +738,10 @@ async function deleteInbound() {
     serviceActive.value = result.serviceActive;
     selectInbound(null);
     pushRun("delete-inbound", true, result.rawOutput);
+    showNotification("入站已删除");
   } catch (e) {
     if (isAbort(e)) return;
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     pushRun("delete-inbound", false, errorMessage(e));
   } finally {
     if (pendingAbort === ctrl) pendingAbort = null;
@@ -666,7 +757,7 @@ async function controlAction(action) {
     token = requireToken();
     uuid = requireSelectedUuid();
   } catch (e) {
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     return;
   }
   const ctrl = newAbortController();
@@ -678,9 +769,15 @@ async function controlAction(action) {
     serviceActive.value = result.serviceActive;
     serviceEnabled.value = result.serviceEnabled;
     pushRun(action, true, result.rawOutput);
+    const successMessages = {
+      start: "服务已启动",
+      stop: "服务已停止",
+      restart: "服务已重启",
+    };
+    showNotification(successMessages[action] || "服务操作已完成");
   } catch (e) {
     if (isAbort(e)) return;
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     pushRun(action, false, errorMessage(e));
   } finally {
     if (pendingAbort === ctrl) pendingAbort = null;
@@ -695,7 +792,7 @@ async function uninstallAll() {
   ) return;
   commandError.value = "";
   if (!stateReady.value) {
-    commandError.value = "请先成功读取节点状态，避免覆盖现有配置";
+    reportCommandFailure("请先成功读取节点状态，避免覆盖现有配置");
     return;
   }
   let token;
@@ -704,7 +801,7 @@ async function uninstallAll() {
     token = requireToken();
     uuid = requireSelectedUuid();
   } catch (e) {
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     return;
   }
   const ctrl = newAbortController();
@@ -734,9 +831,10 @@ async function uninstallAll() {
     inbounds.value = [];
     selectInbound(null);
     pushRun("uninstall", true, [rawOutput, result.rawOutput].filter(Boolean).join("\n"));
+    showNotification("面板配置已移除");
   } catch (e) {
     if (isAbort(e)) return;
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     pushRun("uninstall", false, errorMessage(e));
   } finally {
     if (pendingAbort === ctrl) pendingAbort = null;
@@ -755,6 +853,7 @@ async function runRealityScanAction() {
     uuid = requireSelectedUuid();
   } catch (e) {
     realityError.value = errorMessage(e);
+    showNotification(realityError.value, "error", 4500);
     realityRunning.value = false;
     return;
   }
@@ -765,9 +864,15 @@ async function runRealityScanAction() {
     });
     realityResult.value = parseRealityTargetOutput(result.rawOutput);
     pushRun("reality-targets", true, result.rawOutput);
+    const candidateCount = realityResult.value?.candidates?.length || 0;
+    showNotification(
+      `筛选完成，找到 ${candidateCount} 个候选`,
+      candidateCount ? "success" : "info",
+    );
   } catch (e) {
     if (isAbort(e)) return;
     realityError.value = errorMessage(e);
+    showNotification(realityError.value, "error", 4500);
     pushRun("reality-targets", false, errorMessage(e));
   } finally {
     if (pendingAbort === ctrl) pendingAbort = null;
@@ -787,26 +892,35 @@ function applyRealityCandidate(candidate) {
   if (protocol.value?.tlsMode !== "reality") {
     selectedProtocolId.value = "vless-reality";
   }
+  showNotification("候选已填入入站表单");
 }
 
 async function copyUri() {
-  if (!connectionInfo.value?.uri) return;
+  if (!connectionInfo.value?.uri) {
+    reportCommandFailure("当前没有可复制的 URL");
+    return;
+  }
   try {
     await copyText(connectionInfo.value.uri);
     commandError.value = "";
+    showNotification("URL 已复制");
   } catch (e) {
-    commandError.value = `复制失败：${errorMessage(e)}`;
+    reportCommandFailure(`复制失败：${errorMessage(e)}`);
   }
 }
 
 async function copyAllUris() {
-  if (!allShareUris.value.length) return;
+  if (!allShareUris.value.length) {
+    reportCommandFailure("当前没有可复制的 URL");
+    return;
+  }
   const text = allShareUris.value.map((row) => row.uri).join("\n");
   try {
     await copyText(text);
     commandError.value = "";
+    showNotification(`已复制 ${allShareUris.value.length} 条 URL`);
   } catch (e) {
-    commandError.value = `复制失败：${errorMessage(e)}`;
+    reportCommandFailure(`复制失败：${errorMessage(e)}`);
   }
 }
 
@@ -878,11 +992,11 @@ function mergeInboundIntoState(formSnapshot, protocolId, state) {
 async function batchDeploy() {
   commandError.value = "";
   if (!batchTargets.value.size) {
-    commandError.value = "请先选择至少一个目标节点";
+    reportCommandFailure("请先选择至少一个目标节点");
     return;
   }
   if (!validation.validateAll(form, selectedProtocolId.value)) {
-    commandError.value = "请修正表单错误";
+    reportCommandFailure("请修正表单错误");
     return;
   }
 
@@ -890,7 +1004,7 @@ async function batchDeploy() {
   try {
     token = requireToken();
   } catch (e) {
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     return;
   }
 
@@ -918,7 +1032,7 @@ async function batchDeploy() {
       const normalized = validatePortJumpForm(snapshot, protocolId, port);
       if (normalized != null) snapshot.portJumpRange = normalized;
     } catch (e) {
-      commandError.value = errorMessage(e);
+      reportCommandFailure(errorMessage(e));
       batchRunning.value = false;
       if (pendingAbort === ctrl) pendingAbort = null;
       return;
@@ -972,10 +1086,17 @@ async function batchDeploy() {
         .map((row) => `${row.uuid} ${row.status} ${row.message}`)
         .join("\n")}`,
     );
+    const failedCount = targets.length - okCount;
+    const tone = failedCount === 0 ? "success" : okCount === 0 ? "error" : "warning";
+    showNotification(
+      `批量推送完成：成功 ${okCount}，失败 ${failedCount}`,
+      tone,
+      failedCount ? 4500 : 3000,
+    );
     if (targets.includes(selectedUuid.value)) await refreshState();
   } catch (e) {
     if (isAbort(e)) return;
-    commandError.value = errorMessage(e);
+    reportCommandFailure(errorMessage(e));
     pushRun("batch-deploy", false, errorMessage(e));
   } finally {
     if (pendingAbort === ctrl) pendingAbort = null;
@@ -986,19 +1107,30 @@ async function batchDeploy() {
 function downloadExport(formatId) {
   const label = nodeNameMap.value[selectedUuid.value] || "nodeget";
   const inboundList = inbounds.value;
-  if (!inboundList.length) return;
-  if (formatId === "txt") {
-    triggerDownload(`${label}-uris.txt`, buildPlainTextExport(inboundList, label));
+  if (!inboundList.length) {
+    reportCommandFailure("当前没有可导出的入站");
     return;
   }
-  if (formatId === "clash") {
-    const yaml = buildClashYamlExport(inboundList, label);
-    triggerDownload(`${label}-clash.yaml`, yaml, "application/yaml");
-    return;
-  }
-  if (formatId === "singbox") {
-    const json = buildSingboxOutboundsExport(inboundList, label);
-    triggerDownload(`${label}-singbox-outbounds.json`, json, "application/json");
+  try {
+    let filename;
+    if (formatId === "txt") {
+      filename = `${label}-uris.txt`;
+      triggerDownload(filename, buildPlainTextExport(inboundList, label));
+    } else if (formatId === "clash") {
+      filename = `${label}-clash.yaml`;
+      const yaml = buildClashYamlExport(inboundList, label);
+      triggerDownload(filename, yaml, "application/yaml");
+    } else if (formatId === "singbox") {
+      filename = `${label}-singbox-outbounds.json`;
+      const json = buildSingboxOutboundsExport(inboundList, label);
+      triggerDownload(filename, json, "application/json");
+    } else {
+      throw new Error(`未知导出格式：${formatId}`);
+    }
+    commandError.value = "";
+    showNotification(`已导出 ${filename}`);
+  } catch (e) {
+    reportCommandFailure(`导出失败：${errorMessage(e)}`);
   }
 }
 
@@ -1064,6 +1196,7 @@ export function useSingboxPanel() {
     form,
     commandRunning,
     commandError,
+    notification,
     recentRuns,
     historyFilter,
     filteredHistory,
@@ -1107,6 +1240,7 @@ export function useSingboxPanel() {
     batchDeploy,
     downloadExport,
     clearHistory,
+    dismissNotification,
     abortInFlight,
     // lifecycle helpers
     watchNode,
