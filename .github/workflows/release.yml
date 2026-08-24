@@ -34,13 +34,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Generates VLESS Reality keypairs locally in the dashboard.
-          - Avoids remote `sing-box generate reality-keypair` execution during inbound creation.
-          - Fixes keypair generation failures after NodeGet 0.5.18 execute task timeout changes.
-          - Installs the official musl binary on Alpine instead of the incompatible release `.apk` path.
-          - Fixes VMess QUIC/TLS, Shadowsocks 2022 key sizes, transport URIs, and missing outbound fields.
-          - Preserves existing sing-box DNS, outbound, route, experimental, and service settings.
-          - Validates and backs up configuration before atomic deployment, with rollback on restart failure.
+          - Adds visible success and failure feedback for copy, save, deploy, and service operations.
+          - Automatically detects the selected node's public IP and fills it into new inbound configurations.
+          - Exports SOCKS share links with the standard `socks5://` scheme.
           NOTES
 
       - name: Publish release
