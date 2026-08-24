@@ -48,7 +48,7 @@ function displayName(uuid) {
         class="icon-button"
         :disabled="loadingNodes || commandRunning || batchRunning || realityRunning"
         :title="loadingNodes ? '刷新中' : '刷新节点'"
-        @click="refreshNodes"
+        @click="refreshNodes({ feedback: true })"
       >
         <span class="icon" :class="{ spinning: loadingNodes }">↻</span>
       </button>

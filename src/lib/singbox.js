@@ -165,7 +165,7 @@ function buildSocksUri(form, label) {
   const userInfo = form.username || form.password
     ? `${encodeURIComponent(form.username || "")}:${encodeURIComponent(form.password || "")}@`
     : "";
-  return `socks://${userInfo}${formatHostPort(form.endpointHost, form.endpointPort)}#${encodeURIComponent(label)}`;
+  return `socks5://${userInfo}${formatHostPort(form.endpointHost, form.endpointPort)}#${encodeURIComponent(label)}`;
 }
 
 export function buildShareUri(protocolId, form, label = "nodeget") {

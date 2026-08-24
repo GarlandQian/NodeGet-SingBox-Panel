@@ -22,6 +22,8 @@ const {
   refreshState,
   selectedUuid,
   abortInFlight,
+  notification,
+  dismissNotification,
   closeClient,
 } = useSingboxPanel();
 
@@ -39,6 +41,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   detachWindow?.();
   abortInFlight();
+  dismissNotification();
   closeClient();
 });
 </script>
@@ -68,6 +71,30 @@ onBeforeUnmount(() => {
           <LogPanel v-else-if="activeTab === 'logs'" />
         </div>
       </main>
+    </div>
+
+    <div class="toast-region" aria-live="polite" aria-atomic="true">
+      <Transition name="toast">
+        <div
+          v-if="notification"
+          :key="notification.id"
+          class="toast"
+          :class="`is-${notification.tone}`"
+          :role="notification.tone === 'error' ? 'alert' : 'status'"
+        >
+          <span class="toast-marker" aria-hidden="true" />
+          <span class="toast-message">{{ notification.message }}</span>
+          <button
+            class="toast-close"
+            type="button"
+            title="关闭通知"
+            aria-label="关闭通知"
+            @click="dismissNotification"
+          >
+            ×
+          </button>
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
