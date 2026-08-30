@@ -74,7 +74,7 @@ function withClose(fn) {
           <div class="more-backdrop" @click="closeMenu" />
           <div class="more-popover">
             <div class="more-group-label">服务</div>
-            <button class="more-item" :disabled="batchMode || commandRunning" @click="withClose(() => controlAction('start'))()">启动</button>
+            <button class="more-item" :disabled="batchMode || commandRunning" @click="withClose(() => controlAction('start'))()">开机自启并立即启动</button>
             <button class="more-item" :disabled="batchMode || commandRunning" @click="withClose(() => controlAction('stop'))()">停止</button>
             <button class="more-item" :disabled="batchMode || commandRunning" @click="withClose(() => controlAction('restart'))()">重启</button>
             <div class="more-sep" />
