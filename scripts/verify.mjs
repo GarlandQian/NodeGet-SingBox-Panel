@@ -12,6 +12,7 @@ import {
 import { PROTOCOLS } from "../src/lib/protocols.js";
 import { generateLocalRealityKeypair } from "../src/lib/realityKeypair.js";
 import { readNodeIpAddresses, runExecuteTask } from "../src/lib/nodeget.js";
+import { buildControlScript } from "../src/lib/scripts.js";
 import {
   buildShareUri,
   shadowsocksPasswordBytes,
@@ -77,6 +78,13 @@ const executeResult = await runExecuteTask(executeTaskClient, "token", "uuid", "
   timeoutMs: 100,
 });
 assert.equal(executeResult.output, "ok");
+
+const startControlScript = buildControlScript("start");
+assert.match(startControlScript, /export NGP_ACTION='start'/);
+assert.match(
+  startControlScript,
+  /start\)\n\s+ngp_migrate_legacy_meta\n\s+ngp_service_enable sing-box\n\s+ngp_service_start sing-box/,
+);
 
 for (let index = 0; index < 20; index += 1) {
   const pair = generateLocalRealityKeypair();

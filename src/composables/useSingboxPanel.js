@@ -770,7 +770,7 @@ async function controlAction(action) {
     serviceEnabled.value = result.serviceEnabled;
     pushRun(action, true, result.rawOutput);
     const successMessages = {
-      start: "服务已启动",
+      start: "服务已设为开机自启并立即启动",
       stop: "服务已停止",
       restart: "服务已重启",
     };
