@@ -34,9 +34,8 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Adds visible success and failure feedback for copy, save, deploy, and service operations.
-          - Automatically detects the selected node's public IP and fills it into new inbound configurations.
-          - Exports SOCKS share links with the standard `socks5://` scheme.
+          - Changes the start action to enable sing-box at boot and start it immediately.
+          - Adds explicit UI feedback confirming that both startup settings were applied.
           NOTES
 
       - name: Publish release
