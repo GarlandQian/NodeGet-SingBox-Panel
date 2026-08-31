@@ -3,7 +3,7 @@ export const FIELD_DEFS = {
     key: "endpointHost",
     label: "地址",
     type: "text",
-    placeholder: "example.com / 1.2.3.4",
+    placeholder: "example.com / 1.2.3.4 / 2001:db8::1",
   },
   endpointPort: {
     key: "endpointPort",

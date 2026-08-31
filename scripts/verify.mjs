@@ -15,6 +15,7 @@ import { readNodeIpAddresses, runExecuteTask } from "../src/lib/nodeget.js";
 import { buildControlScript } from "../src/lib/scripts.js";
 import {
   buildShareUri,
+  formatHostPort,
   shadowsocksPasswordBytes,
 } from "../src/lib/singbox.js";
 import { parseReadStateOutput } from "../src/lib/state.js";
@@ -78,6 +79,7 @@ const executeResult = await runExecuteTask(executeTaskClient, "token", "uuid", "
   timeoutMs: 100,
 });
 assert.equal(executeResult.output, "ok");
+assert.equal(formatHostPort("2001:db8::8", 443), "[2001:db8::8]:443");
 
 const startControlScript = buildControlScript("start");
 assert.match(startControlScript, /export NGP_ACTION='start'/);
@@ -104,6 +106,7 @@ for (const [index, protocol] of PROTOCOLS.entries()) {
   const form = makeForm(protocol, index);
   const generatedInbound = buildSingBoxInbound(protocol.id, form);
   assert.equal(generatedInbound.tag, `nodeget-${protocol.id}-${form.endpointPort}`);
+  assert.equal(generatedInbound.listen, "::", `missing dual-stack listen for ${protocol.id}`);
   const shareUri = buildShareUri(protocol.id, form, "test");
   assert.ok(shareUri, `missing URI for ${protocol.id}`);
   if (protocol.id === "socks") assert.match(shareUri, /^socks5:\/\//);
@@ -118,6 +121,14 @@ for (const [index, protocol] of PROTOCOLS.entries()) {
   assert.equal(singboxExport.outbounds.length, 1, `missing sing-box export for ${protocol.id}`);
   assert.match(buildClashYamlExport([entry], "test"), new RegExp(entry.tag));
 }
+
+const ipv6RealityProtocol = PROTOCOLS.find((item) => item.id === "vless-reality");
+const ipv6RealityForm = makeForm(ipv6RealityProtocol);
+ipv6RealityForm.endpointHost = "2001:db8::8";
+assert.ok(
+  buildShareUri(ipv6RealityProtocol.id, ipv6RealityForm, "ipv6")
+    .includes("@[2001:db8::8]:"),
+);
 
 const baseConfig = {
   dns: { servers: [{ tag: "local", address: "local" }] },

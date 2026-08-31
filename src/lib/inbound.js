@@ -130,7 +130,8 @@ export function buildSingBoxInbound(protocolId, form) {
   const base = {
     type: protocol.family,
     tag,
-    listen: "0.0.0.0",
+    // sing-box keeps the IPv6 wildcard on tcp/udp, which creates a dual-stack listener.
+    listen: "::",
     listen_port: port,
   };
 
