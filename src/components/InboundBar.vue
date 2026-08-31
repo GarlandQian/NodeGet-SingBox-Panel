@@ -65,7 +65,10 @@ function endpointLabel(entry) {
         :title="entry.tag"
         @click="selectInbound(entry.id)"
       >
-        <div class="inbound-chip-protocol">{{ protocolLabel(entry.protocolId) }}</div>
+        <div class="inbound-chip-protocol-row">
+          <span class="inbound-chip-protocol">{{ protocolLabel(entry.protocolId) }}</span>
+          <span v-if="entry.form.nextHopEnabled" class="inbound-chip-next-hop">下一跳</span>
+        </div>
         <div class="inbound-chip-endpoint">
           <span class="inbound-chip-host">{{ endpointLabel(entry).host }}</span>
           <span class="inbound-chip-port">:{{ endpointLabel(entry).port }}</span>

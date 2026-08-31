@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { getProtocolFields } from "@/lib/protocols";
+import { describeNextHopUri } from "@/lib/nextHop";
 import { useSingboxPanel } from "@/composables/useSingboxPanel";
 
 const { protocol, selectedProtocolId, form, validation } = useSingboxPanel();
@@ -14,6 +15,18 @@ const extraFields = computed(() =>
       ),
   ),
 );
+
+const nextHopPreview = computed(() => {
+  if (!form.nextHopEnabled) return null;
+  if (!String(form.nextHopUri || "").trim()) {
+    return { error: "请填写下一跳节点 URI" };
+  }
+  try {
+    return describeNextHopUri(form.nextHopUri);
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+});
 
 function onChange(key) {
   validation.markTouched(key);
@@ -44,7 +57,7 @@ function fieldError(key) {
           class="input"
           :class="{ 'has-error': fieldError('endpointHost') }"
           type="text"
-          placeholder="example.com / 1.2.3.4"
+          placeholder="example.com / 1.2.3.4 / 2001:db8::1"
           @input="onChange('endpointHost')"
           @blur="onBlur('endpointHost')"
         />
@@ -85,7 +98,7 @@ function fieldError(key) {
           class="input"
           :class="{ 'has-error': fieldError('handshakeHost') }"
           type="text"
-          placeholder="www.cloudflare.com"
+          placeholder="www.amd.com"
           @input="onChange('handshakeHost')"
           @blur="onBlur('handshakeHost')"
         />
@@ -149,6 +162,37 @@ function fieldError(key) {
         </div>
       </label>
     </div>
+
+    <section class="next-hop-section">
+      <label class="next-hop-toggle">
+        <input v-model="form.nextHopEnabled" type="checkbox" />
+        <span class="next-hop-switch" aria-hidden="true" />
+        <span class="next-hop-toggle-label">通过下一跳节点出站</span>
+        <span class="next-hop-mode">{{ form.nextHopEnabled ? "下一跳" : "直连" }}</span>
+      </label>
+
+      <label v-if="form.nextHopEnabled" class="field next-hop-uri-field">
+        <span class="field-label">下一跳节点 URI</span>
+        <textarea
+          v-model="form.nextHopUri"
+          class="textarea next-hop-uri-input"
+          :class="{ 'has-error': nextHopPreview?.error }"
+          rows="3"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="socks5://user:password@host:port"
+        />
+        <div v-if="nextHopPreview?.error" class="field-error">
+          {{ nextHopPreview.error }}
+        </div>
+        <div v-else-if="nextHopPreview" class="next-hop-preview">
+          <span class="next-hop-preview-dot" aria-hidden="true" />
+          <span>{{ nextHopPreview.label }}</span>
+          <span class="next-hop-preview-endpoint">{{ nextHopPreview.endpoint }}</span>
+        </div>
+      </label>
+    </section>
 
     <slot name="actions" />
   </div>

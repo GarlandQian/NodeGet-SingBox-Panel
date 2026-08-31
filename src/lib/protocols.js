@@ -16,7 +16,7 @@ export const FIELD_DEFS = {
     key: "handshakeHost",
     label: "SNI / 域名",
     type: "text",
-    placeholder: "www.cloudflare.com",
+    placeholder: "www.amd.com",
   },
   handshakePort: {
     key: "handshakePort",
@@ -29,7 +29,7 @@ export const FIELD_DEFS = {
     key: "transportHost",
     label: "Host",
     type: "text",
-    placeholder: "www.cloudflare.com",
+    placeholder: "www.amd.com",
   },
   path: {
     key: "path",
