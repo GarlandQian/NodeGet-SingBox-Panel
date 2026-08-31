@@ -16,6 +16,7 @@ import {
   makeInboundTag,
 } from "@/lib/inbound";
 import { makeMeta } from "@/lib/state";
+import { buildManagedNextHops, parseNextHopUri } from "@/lib/nextHop";
 import { normalizeRealityDomain, parseRealityTargetOutput } from "@/lib/realityTools";
 import { generateLocalRealityKeypair } from "@/lib/realityKeypair";
 import { canonicalPortJumpRange, parsePortJumpRange, toIptablesMultiportSpec } from "@/lib/portJump";
@@ -545,6 +546,22 @@ function validatePortJumpForm(formSnapshot, protocolId, port) {
   return canonicalPortJumpRange(raw);
 }
 
+function validateNextHopForm(formSnapshot) {
+  if (formSnapshot.nextHopEnabled !== true) return;
+  parseNextHopUri(formSnapshot.nextHopUri);
+}
+
+function buildConfigForEntries(entries, foreign, base) {
+  const { outbounds, routeRules } = buildManagedNextHops(entries);
+  return buildSingBoxConfig({
+    inbounds: entries.map((it) => buildSingBoxInbound(it.protocolId, it.form)),
+    foreignInbounds: foreign,
+    baseConfig: base,
+    managedOutbounds: outbounds,
+    managedRouteRules: routeRules,
+  });
+}
+
 async function syncPortJump(token, uuid, ctrl, before, after) {
   const beforeNames = new Map(
     before
@@ -625,12 +642,11 @@ function buildPayload({ replaceId = null, dropId = null } = {}) {
     ];
   }
 
-  const sbInbounds = next.map((it) => buildSingBoxInbound(it.protocolId, it.form));
-  const config = buildSingBoxConfig({
-    inbounds: sbInbounds,
-    foreignInbounds: foreignInbounds.value,
-    baseConfig: baseConfig.value,
-  });
+  const config = buildConfigForEntries(
+    next,
+    foreignInbounds.value,
+    baseConfig.value,
+  );
   const meta = makeMeta(next);
   return { config, meta, nextInbounds: next };
 }
@@ -660,6 +676,7 @@ async function saveInbound() {
     portPort = parsePort(form.endpointPort, "端口");
     const normalized = validatePortJumpForm(form, selectedProtocolId.value, portPort);
     if (normalized != null) form.portJumpRange = normalized;
+    validateNextHopForm(form);
   } catch (e) {
     reportCommandFailure(errorMessage(e));
     return;
@@ -689,7 +706,10 @@ async function saveInbound() {
       if (newest) selectedInboundId.value = newest.id;
     }
     pushRun(action, true, result.rawOutput);
-    showNotification(action === "update-inbound" ? "入站修改已保存" : "入站已添加");
+    const nextHopSuffix = form.nextHopEnabled ? "，已启用下一跳节点" : "";
+    showNotification(
+      `${action === "update-inbound" ? "入站修改已保存" : "入站已添加"}${nextHopSuffix}`,
+    );
   } catch (e) {
     if (isAbort(e)) return;
     reportCommandFailure(errorMessage(e));
@@ -887,8 +907,7 @@ function applyRealityCandidate(candidate) {
     form.handshakeHost = domain;
     form.transportHost = domain;
   }
-  form.endpointPort = Number(realityForm.port || form.endpointPort || 443);
-  form.handshakePort = 443;
+  form.handshakePort = Number(realityForm.port || form.handshakePort || 443);
   if (protocol.value?.tlsMode !== "reality") {
     selectedProtocolId.value = "vless-reality";
   }
@@ -979,12 +998,11 @@ function mergeInboundIntoState(formSnapshot, protocolId, state) {
       },
     ];
   }
-  const sbInbounds = next.map((it) => buildSingBoxInbound(it.protocolId, it.form));
-  const config = buildSingBoxConfig({
-    inbounds: sbInbounds,
-    foreignInbounds: state.foreignInbounds || [],
-    baseConfig: state.config,
-  });
+  const config = buildConfigForEntries(
+    next,
+    state.foreignInbounds || [],
+    state.config,
+  );
   const meta = makeMeta(next);
   return { config, meta, nextInbounds: next };
 }
@@ -997,6 +1015,12 @@ async function batchDeploy() {
   }
   if (!validation.validateAll(form, selectedProtocolId.value)) {
     reportCommandFailure("请修正表单错误");
+    return;
+  }
+  try {
+    validateNextHopForm(form);
+  } catch (e) {
+    reportCommandFailure(errorMessage(e));
     return;
   }
 

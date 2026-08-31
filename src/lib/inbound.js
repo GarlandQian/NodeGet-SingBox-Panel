@@ -1,6 +1,20 @@
 import { getProtocol } from "./protocols";
+import { isManagedNextHopTag } from "./nextHop";
 
 const NODEGET_TAG_PREFIX = "nodeget-";
+const RANDOM_PORT_MIN = 10000;
+const RANDOM_PORT_MAX = 65500;
+const UINT32_RANGE = 0x100000000;
+
+export function randomInboundPort() {
+  const range = RANDOM_PORT_MAX - RANDOM_PORT_MIN + 1;
+  const unbiasedLimit = UINT32_RANGE - (UINT32_RANGE % range);
+  const values = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(values);
+  } while (values[0] >= unbiasedLimit);
+  return RANDOM_PORT_MIN + (values[0] % range);
+}
 
 export function isNodegetTag(tag) {
   return typeof tag === "string" && tag.startsWith(NODEGET_TAG_PREFIX);
@@ -13,10 +27,10 @@ export function makeInboundTag(protocolId, port) {
 export function emptyInboundForm() {
   return {
     endpointHost: "",
-    endpointPort: 443,
-    handshakeHost: "www.cloudflare.com",
+    endpointPort: randomInboundPort(),
+    handshakeHost: "www.amd.com",
     handshakePort: 443,
-    transportHost: "www.cloudflare.com",
+    transportHost: "www.amd.com",
     path: "/",
     serviceName: "grpc",
     uuid: "",
@@ -36,6 +50,8 @@ export function emptyInboundForm() {
     privateKey: "",
     publicKey: "",
     portJumpRange: "",
+    nextHopEnabled: false,
+    nextHopUri: "",
   };
 }
 
@@ -236,7 +252,13 @@ export function buildSingBoxInbound(protocolId, form) {
   throw new Error(`不支持的协议：${protocol.id}`);
 }
 
-export function buildSingBoxConfig({ inbounds, foreignInbounds = [], baseConfig = null }) {
+export function buildSingBoxConfig({
+  inbounds,
+  foreignInbounds = [],
+  baseConfig = null,
+  managedOutbounds = [],
+  managedRouteRules = [],
+}) {
   const hasBaseConfig =
     baseConfig && typeof baseConfig === "object" && !Array.isArray(baseConfig);
   const base = hasBaseConfig
@@ -246,9 +268,43 @@ export function buildSingBoxConfig({ inbounds, foreignInbounds = [], baseConfig 
         outbounds: [{ type: "direct", tag: "direct" }],
         route: { final: "direct" },
       };
+  const baseOutbounds = Array.isArray(base.outbounds) ? base.outbounds : [];
+  const foreignOutbounds = baseOutbounds.filter(
+    (outbound) => !isManagedNextHopTag(outbound?.tag),
+  );
+  const baseRoute =
+    base.route && typeof base.route === "object" && !Array.isArray(base.route)
+      ? base.route
+      : {};
+  const staleManagedFinal = isManagedNextHopTag(baseRoute.final);
+  const hasDirectOutbound = foreignOutbounds.some((outbound) => outbound?.tag === "direct");
+  const needsDirectFallback =
+    (managedOutbounds.length > 0 && foreignOutbounds.length === 0) ||
+    (staleManagedFinal && !hasDirectOutbound);
+  const outbounds = [
+    ...(needsDirectFallback ? [{ type: "direct", tag: "direct" }] : []),
+    ...foreignOutbounds,
+    ...managedOutbounds,
+  ];
+
+  const foreignRouteRules = (Array.isArray(baseRoute.rules) ? baseRoute.rules : []).filter(
+    (rule) => !isManagedNextHopTag(rule?.outbound),
+  );
+  const route = {
+    ...baseRoute,
+    ...(managedRouteRules.length || foreignRouteRules.length || Array.isArray(baseRoute.rules)
+      ? { rules: [...managedRouteRules, ...foreignRouteRules] }
+      : {}),
+    ...((needsDirectFallback && !baseRoute.final) || staleManagedFinal
+      ? { final: "direct" }
+      : {}),
+  };
+
   return {
     ...base,
     inbounds: [...foreignInbounds, ...inbounds],
+    ...(outbounds.length || Array.isArray(base.outbounds) ? { outbounds } : {}),
+    ...(Object.keys(route).length || base.route ? { route } : {}),
   };
 }
 
