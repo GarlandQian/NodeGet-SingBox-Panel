@@ -34,8 +34,9 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Changes the start action to enable sing-box at boot and start it immediately.
-          - Adds explicit UI feedback confirming that both startup settings were applied.
+          - Changes generated inbound listeners from IPv4-only to IPv4/IPv6 dual stack.
+          - Keeps automatic endpoint selection IPv4-first with IPv6 fallback.
+          - Verifies bracketed IPv6 host formatting in share links.
           NOTES
 
       - name: Publish release
