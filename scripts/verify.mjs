@@ -282,6 +282,40 @@ assert.equal(legacyShadowsocks.type, "shadowsocks");
 assert.equal(legacyShadowsocks.method, "aes-128-gcm");
 assert.equal(legacyShadowsocks.password, "secret");
 assert.equal(legacyShadowsocks.server, "203.0.113.20");
+
+const shadowsocks2022Protocol = PROTOCOLS.find((item) => item.id === "shadowsocks");
+const shadowsocks2022Form = makeForm(shadowsocks2022Protocol);
+shadowsocks2022Form.password = "MDEy+MzQvNTY:Nzg@OWFiY2RlZg==";
+const shadowsocks2022Uri = buildShareUri(
+  shadowsocks2022Protocol.id,
+  shadowsocks2022Form,
+  "SS 2022",
+);
+assert.match(
+  shadowsocks2022Uri,
+  /^ss:\/\/2022-blake3-aes-128-gcm:MDEy%2BMzQvNTY%3ANzg%40OWFiY2RlZg%3D%3D@/,
+);
+const parsedShadowsocks2022 = parseNextHopUri(shadowsocks2022Uri);
+assert.equal(parsedShadowsocks2022.method, shadowsocks2022Form.method);
+assert.equal(parsedShadowsocks2022.password, shadowsocks2022Form.password);
+
+const legacyShadowsocksForm = {
+  ...shadowsocks2022Form,
+  method: "aes-128-gcm",
+  password: "legacy-secret",
+};
+const generatedLegacyShadowsocksUri = buildShareUri(
+  shadowsocks2022Protocol.id,
+  legacyShadowsocksForm,
+  "Legacy SS",
+);
+const generatedLegacyUserInfo = generatedLegacyShadowsocksUri
+  .slice("ss://".length)
+  .split("@", 1)[0];
+assert.doesNotMatch(generatedLegacyUserInfo, /[+/=]/);
+const parsedGeneratedLegacyShadowsocks = parseNextHopUri(generatedLegacyShadowsocksUri);
+assert.equal(parsedGeneratedLegacyShadowsocks.method, legacyShadowsocksForm.method);
+assert.equal(parsedGeneratedLegacyShadowsocks.password, legacyShadowsocksForm.password);
 const packetEncodingVless = parseNextHopUri(
   "vless://8099ce00-9d8f-4c7b-bf21-4f7c050082a3@203.0.113.20:443" +
     "?encryption=none&type=tcp&packetEncoding=xudp",

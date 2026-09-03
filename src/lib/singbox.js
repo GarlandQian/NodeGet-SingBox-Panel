@@ -53,6 +53,13 @@ function base64Utf8(value) {
   return btoa(bin);
 }
 
+function base64UrlUtf8(value) {
+  return base64Utf8(value)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
 function shareHost(form) {
   return form.handshakeHost || form.endpointHost || "";
 }
@@ -128,8 +135,10 @@ function buildTrojanUri(protocol, form, label) {
 }
 
 function buildShadowsocksUri(form, label) {
-  const encoded = base64Utf8(`${form.method}:${form.password}`);
-  return `ss://${encoded}@${formatHostPort(form.endpointHost, form.endpointPort)}#${encodeURIComponent(label)}`;
+  const userInfo = String(form.method || "").startsWith("2022-")
+    ? `${encodeURIComponent(form.method)}:${encodeURIComponent(form.password)}`
+    : base64UrlUtf8(`${form.method}:${form.password}`);
+  return `ss://${userInfo}@${formatHostPort(form.endpointHost, form.endpointPort)}#${encodeURIComponent(label)}`;
 }
 
 function buildTuicUri(form, label) {
