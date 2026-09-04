@@ -11,6 +11,7 @@ import BatchProgress from "@/components/BatchProgress.vue";
 import RealityScanner from "@/components/RealityScanner.vue";
 import UriPanel from "@/components/UriPanel.vue";
 import LogPanel from "@/components/LogPanel.vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 
 const {
   theme,
@@ -24,6 +25,8 @@ const {
   abortInFlight,
   notification,
   dismissNotification,
+  confirmation,
+  resolveConfirmation,
   closeClient,
 } = useSingboxPanel();
 
@@ -42,6 +45,7 @@ onBeforeUnmount(() => {
   detachWindow?.();
   abortInFlight();
   dismissNotification();
+  resolveConfirmation(false);
   closeClient();
 });
 </script>
@@ -72,6 +76,18 @@ onBeforeUnmount(() => {
         </div>
       </main>
     </div>
+
+    <ConfirmDialog
+      v-if="confirmation"
+      :key="confirmation.id"
+      :theme="theme"
+      :title="confirmation.title"
+      :message="confirmation.message"
+      :confirm-label="confirmation.confirmLabel"
+      :danger="confirmation.danger"
+      @confirm="resolveConfirmation(true)"
+      @cancel="resolveConfirmation(false)"
+    />
 
     <div class="toast-region" aria-live="polite" aria-atomic="true">
       <Transition name="toast">
