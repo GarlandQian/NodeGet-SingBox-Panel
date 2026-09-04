@@ -105,6 +105,7 @@ const form = reactive(emptyInboundForm());
 const commandRunning = ref(false);
 const commandError = ref("");
 const notification = ref(null);
+const confirmation = ref(null);
 const recentRuns = ref(loadHistory());
 const historyFilter = ref("all");
 
@@ -131,6 +132,8 @@ const validation = useFormValidation();
 let pendingAbort = null;
 let notificationTimer = null;
 let notificationSequence = 0;
+let confirmationResolver = null;
+let confirmationSequence = 0;
 
 function dismissNotification() {
   if (notificationTimer) clearTimeout(notificationTimer);
@@ -153,6 +156,27 @@ function showNotification(message, tone = "success", duration = 3000) {
 function reportCommandFailure(message) {
   commandError.value = message;
   showNotification(message, "error", 4500);
+}
+
+function requestConfirmation(options) {
+  if (confirmationResolver) confirmationResolver(false);
+  return new Promise((resolve) => {
+    confirmationResolver = resolve;
+    confirmation.value = {
+      id: ++confirmationSequence,
+      title: String(options?.title || "确认操作"),
+      message: String(options?.message || ""),
+      confirmLabel: String(options?.confirmLabel || "确认"),
+      danger: options?.danger === true,
+    };
+  });
+}
+
+function resolveConfirmation(confirmed = false) {
+  const resolve = confirmationResolver;
+  confirmationResolver = null;
+  confirmation.value = null;
+  resolve?.(Boolean(confirmed));
 }
 
 function abortInFlight() {
@@ -869,14 +893,18 @@ async function upgradeSingboxAction() {
   const migrationNotice = migration.changes.length
     ? `\n\n检测到 ${migration.changes.length} 项旧配置，将先自动迁移并使用新版本校验。`
     : "\n\n未检测到需要自动迁移的旧配置。";
-  if (
-    typeof window !== "undefined" &&
-    !window.confirm(
+  const confirmed = await requestConfirmation({
+    title: "升级 sing-box",
+    message:
       "确认将当前节点升级到 sing-box 官方最新稳定版？" +
-        migrationNotice +
-        "\n\n升级或迁移失败时会自动保留或恢复旧版本和旧配置。",
-    )
-  ) return;
+      migrationNotice +
+      "\n\n升级或迁移失败时会自动保留或恢复旧版本和旧配置。",
+    confirmLabel: "确认升级",
+  });
+  if (!confirmed) {
+    showNotification("已取消 sing-box 升级", "info");
+    return;
+  }
 
   let token;
   let uuid;
@@ -935,13 +963,19 @@ async function upgradeSingboxAction() {
 }
 
 async function uninstallAll() {
-  if (
-    typeof window !== "undefined" &&
-    !window.confirm("确认移除面板管理的入站和端口跳跃？其他 sing-box 配置、程序和服务将保留。")
-  ) return;
   commandError.value = "";
   if (!stateReady.value) {
     reportCommandFailure("请先成功读取节点状态，避免覆盖现有配置");
+    return;
+  }
+  const confirmed = await requestConfirmation({
+    title: "移除面板配置",
+    message: "确认移除面板管理的入站和端口跳跃？其他 sing-box 配置、程序和服务将保留。",
+    confirmLabel: "确认移除",
+    danger: true,
+  });
+  if (!confirmed) {
+    showNotification("已取消移除面板配置", "info");
     return;
   }
   let token;
@@ -1346,6 +1380,7 @@ export function useSingboxPanel() {
     commandRunning,
     commandError,
     notification,
+    confirmation,
     recentRuns,
     historyFilter,
     filteredHistory,
@@ -1391,6 +1426,7 @@ export function useSingboxPanel() {
     downloadExport,
     clearHistory,
     dismissNotification,
+    resolveConfirmation,
     abortInFlight,
     // lifecycle helpers
     watchNode,

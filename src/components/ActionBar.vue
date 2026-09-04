@@ -213,7 +213,7 @@ onBeforeUnmount(() => {
               <button
                 class="more-item"
                 role="menuitem"
-                :disabled="batchMode || commandRunning || !stateReady"
+                :disabled="batchMode || commandRunning"
                 @click="withClose(upgradeSingboxAction)()"
               >
                 升级 sing-box
