@@ -4,7 +4,7 @@ import { getProtocolFields } from "@/lib/protocols";
 import { describeNextHopUri } from "@/lib/nextHop";
 import { useSingboxPanel } from "@/composables/useSingboxPanel";
 
-const { protocol, selectedProtocolId, form, validation } = useSingboxPanel();
+const { protocol, selectedProtocolId, form, validation, regenSecret } = useSingboxPanel();
 
 const fields = computed(() => getProtocolFields(selectedProtocolId.value));
 const extraFields = computed(() =>
@@ -28,7 +28,11 @@ const nextHopPreview = computed(() => {
   }
 });
 
-function onChange(key) {
+function onChange(key, event) {
+  if (key === "method") {
+    form.method = event?.target?.value || form.method;
+    regenSecret();
+  }
   validation.markTouched(key);
   validation.validateField(form, selectedProtocolId.value, key);
 }
@@ -150,7 +154,7 @@ function fieldError(key) {
           v-model="form[field.key]"
           class="select"
           :class="{ 'has-error': fieldError(field.key) }"
-          @change="onChange(field.key)"
+          @change="onChange(field.key, $event)"
           @blur="onBlur(field.key)"
         >
           <option v-for="option in field.options" :key="option.value" :value="option.value">
