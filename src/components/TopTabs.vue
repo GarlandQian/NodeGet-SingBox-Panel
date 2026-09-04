@@ -7,7 +7,7 @@ const { activeTab, inbounds, recentRuns } = useSingboxPanel();
 const TABS = computed(() => [
   { id: "inbound", label: "入站", count: inbounds.value.length },
   { id: "reality", label: "Reality" },
-  { id: "export", label: "导出 & URL" },
+  { id: "export", label: "导出 & URI" },
   { id: "logs", label: "日志", count: recentRuns.value.length },
 ]);
 </script>

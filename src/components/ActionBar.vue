@@ -17,6 +17,7 @@ const {
   batchRunning,
   saveInbound,
   controlAction,
+  upgradeSingboxAction,
   regenSecret,
   copyUri,
   deleteInbound,
@@ -159,7 +160,7 @@ onBeforeUnmount(() => {
         {{ batchRunning ? "推送中..." : `推送到 ${batchTargets.size} 个节点` }}
       </button>
 
-      <button class="button" :disabled="!connectionInfo?.uri" @click="copyUri">复制 URL</button>
+      <button class="button" :disabled="!connectionInfo?.uri" @click="copyUri">复制 URI</button>
 
       <div class="more-menu">
         <button
@@ -208,6 +209,14 @@ onBeforeUnmount(() => {
                 @click="withClose(() => controlAction('restart'))()"
               >
                 重启
+              </button>
+              <button
+                class="more-item"
+                role="menuitem"
+                :disabled="batchMode || commandRunning || !stateReady"
+                @click="withClose(upgradeSingboxAction)()"
+              >
+                升级 sing-box
               </button>
               <div class="more-sep" />
               <div class="more-group-label">表单</div>

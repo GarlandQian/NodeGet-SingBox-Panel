@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import {
   buildSingBoxConfig,
@@ -9,16 +10,17 @@ import {
   buildClashYamlExport,
   buildSingboxOutboundsExport,
 } from "../src/lib/exporters.js";
+import { migrateSingBoxConfigFor114 } from "../src/lib/configMigration.js";
 import { PROTOCOLS } from "../src/lib/protocols.js";
 import { generateLocalRealityKeypair } from "../src/lib/realityKeypair.js";
 import { readNodeIpAddresses, runExecuteTask } from "../src/lib/nodeget.js";
-import { buildControlScript } from "../src/lib/scripts.js";
+import { buildControlScript, buildUpgradeScript } from "../src/lib/scripts.js";
 import {
   buildShareUri,
   formatHostPort,
   shadowsocksPasswordBytes,
 } from "../src/lib/singbox.js";
-import { parseReadStateOutput } from "../src/lib/state.js";
+import { parseReadStateOutput, parseUpgradeOutput } from "../src/lib/state.js";
 import {
   buildManagedNextHops,
   describeNextHopUri,
@@ -93,6 +95,27 @@ const executeResult = await runExecuteTask(executeTaskClient, "token", "uuid", "
   timeoutMs: 100,
 });
 assert.equal(executeResult.output, "ok");
+
+const failedExecuteClient = {
+  async rpc(method) {
+    if (method === "task_create_task") return { id: 43 };
+    if (method === "task_query") {
+      return [{
+        success: false,
+        error_message: "exit status 1",
+        task_event_result: { execute: "NGP_ERROR=release_checksum_mismatch" },
+      }];
+    }
+    throw new Error(`unexpected RPC method: ${method}`);
+  },
+};
+await assert.rejects(
+  runExecuteTask(failedExecuteClient, "token", "uuid", "false", [], {
+    pollIntervalMs: 0,
+    timeoutMs: 100,
+  }),
+  /exit status 1\nNGP_ERROR=release_checksum_mismatch/,
+);
 assert.equal(formatHostPort("2001:db8::8", 443), "[2001:db8::8]:443");
 
 const startControlScript = buildControlScript("start");
@@ -101,6 +124,138 @@ assert.match(
   startControlScript,
   /start\)\n\s+ngp_migrate_legacy_meta\n\s+ngp_service_enable sing-box\n\s+ngp_service_start sing-box/,
 );
+
+const upgradeScript = buildUpgradeScript();
+const upgradeSyntax = spawnSync("sh", ["-n"], {
+  input: upgradeScript,
+  encoding: "utf8",
+});
+assert.equal(upgradeSyntax.status, 0, upgradeSyntax.stderr);
+assert.match(
+  upgradeScript,
+  /https:\/\/api\.github\.com\/repos\/SagerNet\/sing-box\/releases\/latest/,
+);
+assert.match(upgradeScript, /release_checksum_mismatch/);
+assert.match(upgradeScript, /check -c "\$config_to_check"/);
+assert.match(upgradeScript, /service_restart_failed_upgrade_rolled_back/);
+assert.match(upgradeScript, /rollback_upgrade/);
+assert.match(upgradeScript, /NGP_UPGRADE_STATUS/);
+const migrationUpgradeScript = buildUpgradeScript({
+  config: { log: { level: "warn" } },
+  configSha256: "a".repeat(64),
+  migrationCount: 1,
+});
+assert.match(migrationUpgradeScript, /export NGP_MIGRATION_COUNT='1'/);
+assert.match(migrationUpgradeScript, /export NGP_MIGRATED_CONFIG_B64='[^']+'/);
+assert.match(migrationUpgradeScript, /export NGP_EXPECTED_CONFIG_SHA256='a{64}'/);
+assert.deepEqual(
+  parseUpgradeOutput([
+    "NGP_UPGRADE_STATUS=upgraded",
+    "NGP_SINGBOX_VERSION_OLD=1.13.21",
+    "NGP_SINGBOX_VERSION_NEW=1.14.0",
+    "NGP_RELEASE_TAG=v1.14.0",
+    "NGP_BACKUP_BIN=/usr/local/bin/sing-box.nodeget-pre-upgrade.bak",
+    "NGP_BACKUP_CONFIG=/etc/sing-box/config.json.nodeget-pre-upgrade.bak",
+    "NGP_MIGRATION_COUNT=7",
+    `NGP_CONFIG_SHA256=${"b".repeat(64)}`,
+    "NGP_SERVICE_ACTIVE=active",
+  ].join("\n")),
+  {
+    status: "upgraded",
+    oldVersion: "1.13.21",
+    newVersion: "1.14.0",
+    releaseTag: "v1.14.0",
+    backupBin: "/usr/local/bin/sing-box.nodeget-pre-upgrade.bak",
+    backupConfig: "/etc/sing-box/config.json.nodeget-pre-upgrade.bak",
+    migrationCount: 7,
+    configSha256: "b".repeat(64),
+    serviceActive: "active",
+  },
+);
+
+const legacy114Config = {
+  dns: {
+    servers: [
+      { tag: "local", address: "local" },
+      {
+        tag: "remote",
+        address: "https://dns.example/dns-query",
+        address_resolver: "local",
+        address_strategy: "prefer_ipv4",
+      },
+      { tag: "blocked", address: "rcode://refused" },
+      { tag: "fakeip", address: "fakeip" },
+    ],
+    rules: [
+      { domain: "blocked.example", server: "blocked" },
+      { outbound: "any", server: "local" },
+    ],
+    fakeip: { enabled: true, inet4_range: "198.18.0.0/15" },
+    independent_cache: true,
+  },
+  outbounds: [
+    {
+      type: "socks",
+      tag: "proxy",
+      server: "proxy.example",
+      server_port: 1080,
+      domain_strategy: "prefer_ipv4",
+    },
+  ],
+  route: { final: "proxy" },
+  experimental: { cache_file: { enabled: true, store_rdrc: true } },
+};
+const legacy114Snapshot = structuredClone(legacy114Config);
+const migrated114 = migrateSingBoxConfigFor114(legacy114Config);
+assert.deepEqual(legacy114Config, legacy114Snapshot);
+assert.ok(migrated114.changes.length >= 7);
+assert.deepEqual(migrated114.config.dns.servers, [
+  { tag: "local", type: "local" },
+  {
+    tag: "remote",
+    type: "https",
+    server: "dns.example",
+    path: "/dns-query",
+    domain_resolver: { server: "local", strategy: "prefer_ipv4" },
+  },
+  { tag: "fakeip", type: "fakeip", inet4_range: "198.18.0.0/15" },
+]);
+assert.deepEqual(migrated114.config.dns.rules, [
+  { domain: "blocked.example", action: "predefined", rcode: "REFUSED" },
+]);
+assert.equal("fakeip" in migrated114.config.dns, false);
+assert.equal("independent_cache" in migrated114.config.dns, false);
+assert.deepEqual(migrated114.config.route, {
+  final: "proxy",
+  default_domain_resolver: { server: "local" },
+});
+assert.deepEqual(migrated114.config.outbounds[0].domain_resolver, {
+  server: "local",
+  strategy: "prefer_ipv4",
+});
+assert.equal("domain_strategy" in migrated114.config.outbounds[0], false);
+assert.deepEqual(migrated114.config.experimental.cache_file, {
+  enabled: true,
+  store_dns: true,
+});
+
+assert.throws(
+  () => migrateSingBoxConfigFor114({
+    dns: {
+      servers: [{ tag: "local", address: "local" }],
+      rules: [{ outbound: "any", domain: "example.com", server: "local" }],
+    },
+  }),
+  /包含条件或动作.*无法等价自动迁移/,
+);
+const modern114Config = {
+  dns: { servers: [{ type: "local", tag: "local" }] },
+  outbounds: [{ type: "direct", tag: "direct", domain_resolver: "local" }],
+  route: { final: "direct" },
+};
+const modern114 = migrateSingBoxConfigFor114(modern114Config);
+assert.deepEqual(modern114, { config: modern114Config, changes: [] });
+assert.notEqual(modern114.config, modern114Config);
 
 for (let index = 0; index < 20; index += 1) {
   const pair = generateLocalRealityKeypair();
@@ -261,6 +416,45 @@ const nextHopFallbackConfig = buildSingBoxConfig({
 });
 assert.equal(nextHopFallbackConfig.outbounds[0].tag, "direct");
 assert.equal(nextHopFallbackConfig.route.final, "direct");
+
+const domainNextHopEntry = {
+  ...nextHopEntry,
+  tag: "nodeget-socks-domain",
+  form: {
+    ...nextHopEntry.form,
+    nextHopUri: "socks5://proxy-user:secret@proxy.example:1080",
+  },
+};
+const domainNextHops = buildManagedNextHops([domainNextHopEntry]);
+const domainNextHopConfig = buildSingBoxConfig({
+  baseConfig: {
+    dns: {
+      servers: [{ type: "udp", tag: "existing-dns", server: "1.1.1.1" }],
+    },
+    outbounds: [{ type: "direct", tag: "direct" }],
+    route: { final: "direct" },
+  },
+  inbounds: [{ type: "socks", tag: domainNextHopEntry.tag }],
+  managedOutbounds: domainNextHops.outbounds,
+  managedRouteRules: domainNextHops.routeRules,
+});
+assert.deepEqual(domainNextHopConfig.dns.servers, [
+  { type: "udp", tag: "existing-dns", server: "1.1.1.1" },
+  { type: "local", tag: "nodeget-next-hop-local" },
+]);
+assert.deepEqual(
+  domainNextHopConfig.outbounds.at(-1).domain_resolver,
+  { server: "nodeget-next-hop-local", strategy: "prefer_ipv4" },
+);
+assert.equal("domain_resolver" in nextHopFallbackConfig.outbounds.at(-1), false);
+
+const domainNextHopRemovedConfig = buildSingBoxConfig({
+  baseConfig: domainNextHopConfig,
+  inbounds: [],
+});
+assert.deepEqual(domainNextHopRemovedConfig.dns.servers, [
+  { type: "udp", tag: "existing-dns", server: "1.1.1.1" },
+]);
 assert.throws(
   () => parseNextHopUri("socks5://127.0.0.1:1080?unsupported=1"),
   /暂不支持 URI 参数：unsupported/,
@@ -349,6 +543,7 @@ assert.throws(
 );
 
 const stateOutput = [
+  `NGP_CONFIG_SHA256=${"c".repeat(64)}`,
   "NGP_CONFIG_BEGIN",
   JSON.stringify(baseConfig),
   "NGP_CONFIG_END",
@@ -357,6 +552,7 @@ const stateOutput = [
   "NGP_META_END",
 ].join("\n");
 const state = parseReadStateOutput(stateOutput);
+assert.equal(state.configSha256, "c".repeat(64));
 assert.equal(state.foreignInbounds.length, 1);
 assert.equal(state.configParseError, false);
 assert.equal(state.metaParseError, false);
