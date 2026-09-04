@@ -1300,14 +1300,6 @@ function watchNode() {
     selectInbound(null);
     refreshState();
   });
-  watch(
-    () => form.method,
-    () => {
-      if (protocol.value?.family === "shadowsocks") {
-        form.password = randomBase64(shadowsocksPasswordBytes(form.method));
-      }
-    },
-  );
 }
 
 function attachWindowListeners() {

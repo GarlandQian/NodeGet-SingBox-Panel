@@ -135,9 +135,7 @@ function buildTrojanUri(protocol, form, label) {
 }
 
 function buildShadowsocksUri(form, label) {
-  const userInfo = String(form.method || "").startsWith("2022-")
-    ? `${encodeURIComponent(form.method)}:${encodeURIComponent(form.password)}`
-    : base64UrlUtf8(`${form.method}:${form.password}`);
+  const userInfo = base64UrlUtf8(`${form.method}:${form.password}`);
   return `ss://${userInfo}@${formatHostPort(form.endpointHost, form.endpointPort)}#${encodeURIComponent(label)}`;
 }
 

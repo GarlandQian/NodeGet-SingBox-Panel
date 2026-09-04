@@ -485,9 +485,13 @@ const shadowsocks2022Uri = buildShareUri(
   shadowsocks2022Form,
   "SS 2022",
 );
-assert.match(
-  shadowsocks2022Uri,
-  /^ss:\/\/2022-blake3-aes-128-gcm:MDEy%2BMzQvNTY%3ANzg%40OWFiY2RlZg%3D%3D@/,
+const shadowsocks2022UserInfo = shadowsocks2022Uri
+  .slice("ss://".length)
+  .split("@", 1)[0];
+assert.doesNotMatch(shadowsocks2022UserInfo, /[+/=:]/);
+assert.equal(
+  decodeBase64Url(shadowsocks2022UserInfo).toString("utf8"),
+  `${shadowsocks2022Form.method}:${shadowsocks2022Form.password}`,
 );
 const parsedShadowsocks2022 = parseNextHopUri(shadowsocks2022Uri);
 assert.equal(parsedShadowsocks2022.method, shadowsocks2022Form.method);
@@ -560,6 +564,37 @@ assert.equal(
   parseReadStateOutput(`${stateOutput}\n[... Output truncated, 20 bytes omitted ...]`)
     .outputTruncated,
   true,
+);
+
+const storedShadowsocksPassword = "MDEy+MzQvNTY/Nzg@OWFiY2RlZg==";
+const storedShadowsocksEntry = {
+  id: "stored-shadowsocks",
+  tag: "nodeget-shadowsocks-23456",
+  protocolId: "shadowsocks",
+  form: {
+    ...shadowsocks2022Form,
+    endpointPort: 23456,
+    password: storedShadowsocksPassword,
+  },
+};
+const storedShadowsocksState = parseReadStateOutput([
+  "NGP_CONFIG_BEGIN",
+  "{}",
+  "NGP_CONFIG_END",
+  "NGP_META_BEGIN",
+  JSON.stringify({ version: 2, inbounds: [storedShadowsocksEntry] }),
+  "NGP_META_END",
+].join("\n"));
+const restoredShadowsocksForm = storedShadowsocksState.meta.inbounds[0].form;
+assert.equal(restoredShadowsocksForm.password, storedShadowsocksPassword);
+const restoredShadowsocksUri = buildShareUri(
+  "shadowsocks",
+  restoredShadowsocksForm,
+  "stored",
+);
+assert.equal(
+  parseNextHopUri(restoredShadowsocksUri).password,
+  storedShadowsocksPassword,
 );
 
 const vmessProtocol = PROTOCOLS.find((item) => item.id === "vmess-ws");
