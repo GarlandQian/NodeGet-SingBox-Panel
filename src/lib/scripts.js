@@ -2,6 +2,7 @@ import preludeScript from "./scripts/_prelude.sh?raw";
 import readStateScript from "./scripts/read_state.sh?raw";
 import deployScript from "./scripts/deploy.sh?raw";
 import controlScript from "./scripts/control.sh?raw";
+import upgradeScript from "./scripts/upgrade.sh?raw";
 import uninstallScript from "./scripts/uninstall.sh?raw";
 import realityScanScript from "./scripts/reality_scan.sh?raw";
 import portjumpApplyScript from "./scripts/portjump_apply.sh?raw";
@@ -49,6 +50,21 @@ export function buildDeployScript({ config, meta }) {
 
 export function buildControlScript(action) {
   return assemble({ NGP_ACTION: action }, controlScript);
+}
+
+export function buildUpgradeScript({
+  config = null,
+  configSha256 = "",
+  migrationCount = 0,
+} = {}) {
+  const env = {
+    NGP_MIGRATION_COUNT: String(migrationCount),
+  };
+  if (config != null) {
+    env.NGP_MIGRATED_CONFIG_B64 = jsonToBase64(config);
+    if (configSha256) env.NGP_EXPECTED_CONFIG_SHA256 = configSha256;
+  }
+  return assemble(env, upgradeScript);
 }
 
 export function buildUninstallScript() {

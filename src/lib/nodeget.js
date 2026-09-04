@@ -8,11 +8,13 @@ import {
   buildReadStateScript,
   buildRealityScanScript,
   buildUninstallScript,
+  buildUpgradeScript,
 } from "./scripts";
 import {
   parseControlOutput,
   parseDeployOutput,
   parseReadStateOutput,
+  parseUpgradeOutput,
 } from "./state";
 
 export function createNodegetClient() {
@@ -107,7 +109,12 @@ async function runAgentTask(
       return { taskId, record };
     }
     if (record.success === false) {
-      throw new Error(record.error_message || `${resultType} failed: ${errorLabel}`);
+      const resultDetail = record.task_event_result?.[resultType];
+      const detail = typeof resultDetail === "string" ? resultDetail.trim() : "";
+      throw new Error(
+        [record.error_message, detail].filter(Boolean).join("\n") ||
+          `${resultType} failed: ${errorLabel}`,
+      );
     }
   }
   throw new Error(`${resultType} timeout: ${errorLabel}`);
@@ -185,6 +192,14 @@ export async function controlSingboxService(client, token, uuid, action, options
     ...options,
   });
   return { ...parseControlOutput(result.output), rawOutput: result.output };
+}
+
+export async function upgradeSingbox(client, token, uuid, payload = {}, options = {}) {
+  const result = await runShell(client, token, uuid, buildUpgradeScript(payload), {
+    timeoutMs: 360000,
+    ...options,
+  });
+  return { ...parseUpgradeOutput(result.output), rawOutput: result.output };
 }
 
 export async function uninstallSingbox(client, token, uuid, options = {}) {

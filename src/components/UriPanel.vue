@@ -17,19 +17,19 @@ function exportAs(format) {
   <section class="panel">
     <div class="panel-grid">
       <div class="preview">
-        <p class="section-title">URL 信息</p>
+        <p class="section-title">URI 信息</p>
         <div v-if="connectionInfo" class="status-grid">
           <div v-for="item in connectionInfo.details" :key="item[0]" class="status-card">
             <div class="status-title">{{ item[0] }}</div>
             <div class="status-value">{{ item[1] }}</div>
           </div>
         </div>
-        <div v-else class="empty">先填写域名 / IP 和节点，再生成 URL。</div>
+        <div v-else class="empty">先填写域名 / IP 和节点，再生成 URI。</div>
       </div>
 
       <div class="output">
         <div class="panel-title-row">
-          <p class="section-title">URL</p>
+          <p class="section-title">URI</p>
           <div class="export-row">
             <button
               class="button small"

@@ -2,6 +2,7 @@ import { getProtocol } from "./protocols";
 import { isManagedNextHopTag } from "./nextHop";
 
 const NODEGET_TAG_PREFIX = "nodeget-";
+const MANAGED_DNS_TAG = "nodeget-next-hop-local";
 const RANDOM_PORT_MIN = 10000;
 const RANDOM_PORT_MAX = 65500;
 const UINT32_RANGE = 0x100000000;
@@ -68,6 +69,59 @@ function withDefined(object) {
 function numberOrNull(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isIpLiteral(value) {
+  const host = String(value || "").trim();
+  if (host.includes(":")) return true;
+  const octets = host.split(".");
+  return octets.length === 4 && octets.every((octet) => {
+    if (!/^\d{1,3}$/.test(octet)) return false;
+    const number = Number(octet);
+    return number >= 0 && number <= 255;
+  });
+}
+
+function addManagedDomainResolvers(outbounds) {
+  let needsManagedDns = false;
+  const resolvedOutbounds = outbounds.map((outbound) => {
+    if (!outbound?.server || isIpLiteral(outbound.server) || outbound.domain_resolver) {
+      return outbound;
+    }
+    needsManagedDns = true;
+    return {
+      ...outbound,
+      domain_resolver: {
+        server: MANAGED_DNS_TAG,
+        strategy: "prefer_ipv4",
+      },
+    };
+  });
+  return { resolvedOutbounds, needsManagedDns };
+}
+
+function mergeManagedDns(baseDns, needsManagedDns) {
+  const hasBaseDns =
+    baseDns && typeof baseDns === "object" && !Array.isArray(baseDns);
+  const dns = hasBaseDns ? baseDns : {};
+  const baseServers = Array.isArray(dns.servers) ? dns.servers : [];
+  const foreignServers = baseServers.filter((server) => server?.tag !== MANAGED_DNS_TAG);
+
+  if (needsManagedDns) {
+    return {
+      ...dns,
+      servers: [
+        ...foreignServers,
+        { type: "local", tag: MANAGED_DNS_TAG },
+      ],
+    };
+  }
+
+  if (foreignServers.length === baseServers.length) return hasBaseDns ? baseDns : undefined;
+  const cleaned = { ...dns };
+  if (foreignServers.length) cleaned.servers = foreignServers;
+  else delete cleaned.servers;
+  return Object.keys(cleaned).length ? cleaned : undefined;
 }
 
 function buildTls(protocol, form) {
@@ -281,11 +335,15 @@ export function buildSingBoxConfig({
   const needsDirectFallback =
     (managedOutbounds.length > 0 && foreignOutbounds.length === 0) ||
     (staleManagedFinal && !hasDirectOutbound);
+  const { resolvedOutbounds, needsManagedDns } = addManagedDomainResolvers(
+    managedOutbounds,
+  );
   const outbounds = [
     ...(needsDirectFallback ? [{ type: "direct", tag: "direct" }] : []),
     ...foreignOutbounds,
-    ...managedOutbounds,
+    ...resolvedOutbounds,
   ];
+  const dns = mergeManagedDns(base.dns, needsManagedDns);
 
   const foreignRouteRules = (Array.isArray(baseRoute.rules) ? baseRoute.rules : []).filter(
     (rule) => !isManagedNextHopTag(rule?.outbound),
@@ -300,12 +358,15 @@ export function buildSingBoxConfig({
       : {}),
   };
 
-  return {
+  const config = {
     ...base,
     inbounds: [...foreignInbounds, ...inbounds],
     ...(outbounds.length || Array.isArray(base.outbounds) ? { outbounds } : {}),
     ...(Object.keys(route).length || base.route ? { route } : {}),
   };
+  if (dns) config.dns = dns;
+  else delete config.dns;
+  return config;
 }
 
 export function makeInboundId() {

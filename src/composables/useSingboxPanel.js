@@ -17,6 +17,7 @@ import {
 } from "@/lib/inbound";
 import { makeMeta } from "@/lib/state";
 import { buildManagedNextHops, parseNextHopUri } from "@/lib/nextHop";
+import { migrateSingBoxConfigFor114 } from "@/lib/configMigration";
 import { normalizeRealityDomain, parseRealityTargetOutput } from "@/lib/realityTools";
 import { generateLocalRealityKeypair } from "@/lib/realityKeypair";
 import { canonicalPortJumpRange, parsePortJumpRange, toIptablesMultiportSpec } from "@/lib/portJump";
@@ -32,6 +33,7 @@ import {
   removePortJumpUnits,
   runRealityScan,
   uninstallSingbox,
+  upgradeSingbox,
 } from "@/lib/nodeget";
 import {
   buildClashYamlExport,
@@ -47,7 +49,7 @@ const HISTORY_FILTERS = {
   all: () => true,
   deploy: (run) => /(add-inbound|update-inbound|delete-inbound|batch-deploy)/.test(run.action),
   read: (run) => run.action === "read-state",
-  control: (run) => ["start", "stop", "restart", "uninstall"].includes(run.action),
+  control: (run) => ["start", "stop", "restart", "upgrade", "uninstall"].includes(run.action),
   reality: (run) => run.action === "reality-targets",
   failed: (run) => !run.ok,
 };
@@ -94,6 +96,7 @@ const singboxVersion = ref("");
 const inbounds = ref([]);
 const foreignInbounds = ref([]);
 const baseConfig = ref(null);
+const baseConfigSha256 = ref("");
 
 const selectedInboundId = ref(null);
 const selectedProtocolId = ref("vless-reality");
@@ -228,6 +231,30 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function upgradeErrorMessage(error) {
+  const raw = errorMessage(error);
+  const knownErrors = [
+    ["missing_sing-box", "节点尚未安装 sing-box，请先添加入站完成安装"],
+    ["unsupported_arch_", "节点 CPU 架构不受官方发布包支持"],
+    ["release_metadata_download_failed", "无法读取 sing-box 官方稳定版信息"],
+    ["invalid_stable_release_tag", "官方最新版本标签不是稳定版格式，已停止升级"],
+    ["release_digest_missing_", "官方发布资产缺少 SHA-256 摘要，已停止升级"],
+    ["release_download_failed", "下载 sing-box 官方发布包失败"],
+    ["release_checksum_mismatch", "发布包 SHA-256 校验失败，未替换现有版本"],
+    ["release_extract_failed", "解压 sing-box 官方发布包失败"],
+    ["release_binary_missing", "官方发布包中未找到 sing-box 二进制文件"],
+    ["release_version_mismatch", "下载文件的版本与官方版本标签不一致"],
+    ["migrated_config_decode_failed", "自动迁移后的配置传输失败，未修改节点"],
+    ["config_changed_since_read", "节点配置在读取后已发生变化，请重新读取状态再升级"],
+    ["new_version_rejected_migrated_config", "自动迁移后的配置未通过新版本检查，未修改现有版本或配置；详情见操作日志"],
+    ["binary_commit_failed_rolled_back", "写入新版本失败，已恢复原版本和配置"],
+    ["config_commit_failed_rolled_back", "写入迁移配置失败，已恢复原版本和配置"],
+    ["service_restart_failed_upgrade_rolled_back", "升级后重启失败，已恢复原版本和配置"],
+    ["service_unhealthy_upgrade_rolled_back", "升级后服务状态异常，已恢复原版本和配置"],
+  ];
+  return knownErrors.find(([code]) => raw.includes(code))?.[1] || raw;
+}
+
 function copyTextFallback(text) {
   if (typeof document === "undefined" || !document.body) {
     throw new Error("clipboard_unavailable");
@@ -276,16 +303,33 @@ function copyTextFallback(text) {
 }
 
 async function copyText(text) {
-  try {
-    copyTextFallback(text);
-    return;
-  } catch (fallbackError) {
-    if (!navigator.clipboard?.writeText || window.isSecureContext === false) {
-      throw fallbackError;
+  let clipboardError = null;
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.clipboard?.writeText &&
+    (typeof window === "undefined" || window.isSecureContext !== false)
+  ) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      clipboardError = error;
     }
   }
 
-  await navigator.clipboard.writeText(text);
+  try {
+    copyTextFallback(text);
+  } catch (fallbackError) {
+    throw clipboardError || fallbackError;
+  }
+}
+
+function validateGeneratedUri(uri) {
+  try {
+    parseNextHopUri(uri, "nodeget-copy-validation");
+  } catch (error) {
+    throw new Error(`生成的 URI 无效：${errorMessage(error)}`);
+  }
 }
 
 function isAbort(error) {
@@ -445,6 +489,7 @@ async function refreshState(options = {}) {
     serviceEnabled.value = state.serviceEnabled;
     singboxVersion.value = state.singboxVersion;
     baseConfig.value = state.config;
+    baseConfigSha256.value = state.configSha256;
     foreignInbounds.value = state.foreignInbounds;
     inbounds.value = state.meta.inbounds || [];
     stateReady.value = true;
@@ -699,6 +744,7 @@ async function saveInbound() {
     );
     await syncPortJump(token, uuid, ctrl, before, nextInbounds);
     baseConfig.value = config;
+    baseConfigSha256.value = result.configSha256;
     inbounds.value = nextInbounds;
     serviceActive.value = result.serviceActive;
     if (!isEditing.value) {
@@ -754,6 +800,7 @@ async function deleteInbound() {
     );
     await syncPortJump(token, uuid, ctrl, before, nextInbounds);
     baseConfig.value = config;
+    baseConfigSha256.value = result.configSha256;
     inbounds.value = nextInbounds;
     serviceActive.value = result.serviceActive;
     selectInbound(null);
@@ -805,6 +852,88 @@ async function controlAction(action) {
   }
 }
 
+async function upgradeSingboxAction() {
+  commandError.value = "";
+  if (!stateReady.value) {
+    reportCommandFailure("请先成功读取节点状态，再执行升级和配置迁移");
+    return;
+  }
+
+  let migration;
+  try {
+    migration = migrateSingBoxConfigFor114(baseConfig.value);
+  } catch (e) {
+    reportCommandFailure(`无法自动迁移配置：${errorMessage(e)}`);
+    return;
+  }
+  const migrationNotice = migration.changes.length
+    ? `\n\n检测到 ${migration.changes.length} 项旧配置，将先自动迁移并使用新版本校验。`
+    : "\n\n未检测到需要自动迁移的旧配置。";
+  if (
+    typeof window !== "undefined" &&
+    !window.confirm(
+      "确认将当前节点升级到 sing-box 官方最新稳定版？" +
+        migrationNotice +
+        "\n\n升级或迁移失败时会自动保留或恢复旧版本和旧配置。",
+    )
+  ) return;
+
+  let token;
+  let uuid;
+  try {
+    token = requireToken();
+    uuid = requireSelectedUuid();
+  } catch (e) {
+    reportCommandFailure(errorMessage(e));
+    return;
+  }
+
+  const ctrl = newAbortController();
+  commandRunning.value = true;
+  showNotification("正在检查并升级 sing-box...", "info", 6000);
+  try {
+    const result = await upgradeSingbox(
+      client,
+      token,
+      uuid,
+      {
+        config: migration.changes.length ? migration.config : null,
+        configSha256: migration.changes.length ? baseConfigSha256.value : "",
+        migrationCount: migration.changes.length,
+      },
+      { signal: ctrl.signal },
+    );
+    serviceActive.value = result.serviceActive;
+    singboxVersion.value = result.newVersion;
+    if (migration.changes.length) {
+      baseConfig.value = migration.config;
+      baseConfigSha256.value = result.configSha256;
+    }
+    pushRun("upgrade", true, result.rawOutput, {
+      oldVersion: result.oldVersion,
+      newVersion: result.newVersion,
+      migrations: migration.changes,
+    });
+    const versionMessage = result.status === "up-to-date"
+      ? `sing-box 已是最新稳定版 ${result.newVersion}`
+      : result.oldVersion === result.newVersion
+        ? `sing-box ${result.newVersion} 配置迁移完成`
+        : `sing-box 已从 ${result.oldVersion} 升级到 ${result.newVersion}`;
+    const migrationMessage = result.migrationCount
+      ? `，已迁移 ${result.migrationCount} 项旧配置`
+      : "";
+    showNotification(`${versionMessage}${migrationMessage}`, "success", 6000);
+  } catch (e) {
+    if (isAbort(e)) return;
+    const rawMessage = errorMessage(e);
+    reportCommandFailure(`升级失败：${upgradeErrorMessage(e)}`);
+    pushRun("upgrade", false, rawMessage);
+  } finally {
+    if (pendingAbort === ctrl) pendingAbort = null;
+    commandRunning.value = false;
+  }
+}
+
 async function uninstallAll() {
   if (
     typeof window !== "undefined" &&
@@ -844,6 +973,7 @@ async function uninstallAll() {
       );
       await syncPortJump(token, uuid, ctrl, before, []);
       baseConfig.value = config;
+      baseConfigSha256.value = deployResult.configSha256;
       serviceActive.value = deployResult.serviceActive;
       rawOutput = deployResult.rawOutput;
     }
@@ -916,13 +1046,14 @@ function applyRealityCandidate(candidate) {
 
 async function copyUri() {
   if (!connectionInfo.value?.uri) {
-    reportCommandFailure("当前没有可复制的 URL");
+    reportCommandFailure("当前没有可复制的 URI");
     return;
   }
   try {
+    validateGeneratedUri(connectionInfo.value.uri);
     await copyText(connectionInfo.value.uri);
     commandError.value = "";
-    showNotification("URL 已复制");
+    showNotification("URI 已复制");
   } catch (e) {
     reportCommandFailure(`复制失败：${errorMessage(e)}`);
   }
@@ -930,14 +1061,15 @@ async function copyUri() {
 
 async function copyAllUris() {
   if (!allShareUris.value.length) {
-    reportCommandFailure("当前没有可复制的 URL");
+    reportCommandFailure("当前没有可复制的 URI");
     return;
   }
-  const text = allShareUris.value.map((row) => row.uri).join("\n");
   try {
+    for (const row of allShareUris.value) validateGeneratedUri(row.uri);
+    const text = allShareUris.value.map((row) => row.uri).join("\n");
     await copyText(text);
     commandError.value = "";
-    showNotification(`已复制 ${allShareUris.value.length} 条 URL`);
+    showNotification(`已复制 ${allShareUris.value.length} 条 URI`);
   } catch (e) {
     reportCommandFailure(`复制失败：${errorMessage(e)}`);
   }
@@ -1162,6 +1294,7 @@ function watchNode() {
   watch(selectedUuid, () => {
     stateReady.value = false;
     baseConfig.value = null;
+    baseConfigSha256.value = "";
     foreignInbounds.value = [];
     inbounds.value = [];
     selectInbound(null);
@@ -1252,6 +1385,7 @@ export function useSingboxPanel() {
     saveInbound,
     deleteInbound,
     controlAction,
+    upgradeSingboxAction,
     uninstallAll,
     runRealityScanAction,
     applyRealityCandidate,

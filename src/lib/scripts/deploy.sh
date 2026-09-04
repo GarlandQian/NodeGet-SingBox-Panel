@@ -90,3 +90,6 @@ else
 fi
 printf 'NGP_CONFIG_FILE=%s\n' "$CONFIG_FILE"
 printf 'NGP_META_FILE=%s\n' "$META_FILE"
+if command -v sha256sum >/dev/null 2>&1; then
+  printf 'NGP_CONFIG_SHA256=%s\n' "$(ngp_root sha256sum "$CONFIG_FILE" | awk '{print $1}')"
+fi

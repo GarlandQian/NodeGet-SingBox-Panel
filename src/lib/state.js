@@ -73,6 +73,7 @@ export function parseReadStateOutput(rawOutput) {
     serviceEnabled: scalars.SERVICE_ENABLED || "unknown",
     serviceManager: scalars.SERVICE_MANAGER || "unknown",
     singboxVersion: scalars.SINGBOX_VERSION || "unknown",
+    configSha256: scalars.CONFIG_SHA256 || "",
     hostArch: scalars.HOST_ARCH || "",
     hostKernel: scalars.HOST_KERNEL || "",
     configCheckRaw,
@@ -139,6 +140,7 @@ export function parseDeployOutput(rawOutput) {
     serviceManager: scalars.SERVICE_MANAGER || "unknown",
     configFile: scalars.CONFIG_FILE || "",
     metaFile: scalars.META_FILE || "",
+    configSha256: scalars.CONFIG_SHA256 || "",
   };
 }
 
@@ -148,5 +150,20 @@ export function parseControlOutput(rawOutput) {
     serviceActive: scalars.SERVICE_ACTIVE || "unknown",
     serviceEnabled: scalars.SERVICE_ENABLED || "unknown",
     serviceManager: scalars.SERVICE_MANAGER || "unknown",
+  };
+}
+
+export function parseUpgradeOutput(rawOutput) {
+  const scalars = parseScalars(rawOutput);
+  return {
+    status: scalars.UPGRADE_STATUS || "unknown",
+    oldVersion: scalars.SINGBOX_VERSION_OLD || "unknown",
+    newVersion: scalars.SINGBOX_VERSION_NEW || "unknown",
+    releaseTag: scalars.RELEASE_TAG || "",
+    backupBin: scalars.BACKUP_BIN || "",
+    backupConfig: scalars.BACKUP_CONFIG || "",
+    migrationCount: Number(scalars.MIGRATION_COUNT || 0),
+    configSha256: scalars.CONFIG_SHA256 || "",
+    serviceActive: scalars.SERVICE_ACTIVE || "unknown",
   };
 }

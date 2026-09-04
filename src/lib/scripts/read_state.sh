@@ -15,6 +15,9 @@ printf 'NGP_SERVICE_ENABLED=%s\n' "$(ngp_service_enabled sing-box)"
 printf 'NGP_SERVICE_MANAGER=%s\n' "$(ngp_service_manager)"
 printf 'NGP_HOST_ARCH=%s\n' "$(uname -m)"
 printf 'NGP_HOST_KERNEL=%s\n' "$(uname -r)"
+if ngp_root test -f "$CONFIG_FILE" && command -v sha256sum >/dev/null 2>&1; then
+  printf 'NGP_CONFIG_SHA256=%s\n' "$(ngp_root sha256sum "$CONFIG_FILE" | awk '{print $1}')"
+fi
 
 echo 'NGP_CONFIG_BEGIN'
 if ngp_root test -f "$CONFIG_FILE"; then
