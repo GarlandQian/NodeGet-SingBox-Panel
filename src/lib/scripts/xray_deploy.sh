@@ -41,7 +41,7 @@ cleanup_xray() {
   if [ "$xray_commit" -eq 1 ] && [ "$xray_complete" -eq 0 ]; then
     rollback_xray || printf 'NGP_ERROR=xray_rollback_failed\n'
   fi
-  ngp_root rm -f "$XRAY_ROOT/config.stage" "$XRAY_ROOT/meta.stage" "$XRAY_BIN.stage"
+  ngp_root rm -f "$XRAY_ROOT/config.stage.json" "$XRAY_ROOT/meta.stage" "$XRAY_BIN.stage"
   rm -f "$xray_work/release.json" "$xray_work/xray.zip" "$xray_work/xray" "$xray_work/service" "$xray_work/config" "$xray_work/meta"
   rmdir "$xray_work" 2>/dev/null || true
   ngp_root rmdir "$XRAY_ROOT/.lock" 2>/dev/null || true
@@ -63,7 +63,7 @@ case "$NGP_XRAY_OPERATION" in
   *) ngp_error xray_invalid_operation ;;
 esac
 # Stage in private directories before changing any live file.
-ngp_write_root_file "$xray_work/config" "$XRAY_ROOT/config.stage" 0600
+ngp_write_root_file "$xray_work/config" "$XRAY_ROOT/config.stage.json" 0600
 ngp_write_root_file "$xray_work/meta" "$XRAY_ROOT/meta.stage" 0600
 rm -f "$xray_work/config" "$xray_work/meta"
 xray_old_version="$(ngp_xray_version)"
@@ -74,7 +74,14 @@ else
   [ "$xray_old_version" = "${NGP_XRAY_RELEASE#v}" ] || ngp_error xray_version_not_baseline
   ngp_root cp "$XRAY_BIN" "$XRAY_BIN.stage"
 fi
-ngp_root "$XRAY_BIN.stage" run -test -config "$XRAY_ROOT/config.stage" || ngp_error xray_config_rejected
+xray_config_hash="$(ngp_xray_hash "$XRAY_ROOT/config.stage.json")"
+xray_meta_hash="$(ngp_xray_hash "$XRAY_ROOT/meta.stage")"
+echo NGP_XRAY_CHECK_BEGIN
+if ! ngp_root "$XRAY_BIN.stage" run -test -config "$XRAY_ROOT/config.stage.json"; then
+  echo NGP_XRAY_CHECK_END
+  ngp_error xray_config_rejected
+fi
+echo NGP_XRAY_CHECK_END
 ngp_xray_ensure_service
 ngp_xray_check_revision
 if ngp_root test -f "$XRAY_CONFIG"; then
@@ -93,7 +100,7 @@ if ngp_root test -f "$XRAY_BIN"; then
 fi
 xray_commit=1
 ngp_root mv -f "$XRAY_BIN.stage" "$XRAY_BIN"
-ngp_root mv -f "$XRAY_ROOT/config.stage" "$XRAY_CONFIG"
+ngp_root mv -f "$XRAY_ROOT/config.stage.json" "$XRAY_CONFIG"
 ngp_root mv -f "$XRAY_ROOT/meta.stage" "$XRAY_META"
 if [ "$NGP_XRAY_OPERATION" = deploy ] || [ "$xray_was_active" = active ]; then
   if [ "$NGP_XRAY_OPERATION" = deploy ]; then ngp_service_enable "$XRAY_SERVICE"; fi
@@ -101,8 +108,16 @@ if [ "$NGP_XRAY_OPERATION" = deploy ] || [ "$xray_was_active" = active ]; then
   sleep 1
   [ "$(ngp_service_active "$XRAY_SERVICE" | tail -n 1)" = active ] || ngp_error xray_unhealthy_rolled_back
 fi
-xray_complete=1
+[ "$(ngp_xray_hash "$XRAY_CONFIG")" = "$xray_config_hash" ] || ngp_error xray_commit_hash_mismatch
+[ "$(ngp_xray_hash "$XRAY_META")" = "$xray_meta_hash" ] || ngp_error xray_commit_hash_mismatch
 ngp_xray_status
 printf 'NGP_CONFIG_FILE=%s\n' "$XRAY_CONFIG"
 printf 'NGP_META_FILE=%s\n' "$XRAY_META"
 printf 'NGP_XRAY_VERSION_OLD=%s\n' "$xray_old_version"
+printf 'NGP_XRAY_PREVIOUS_SERVICE_ACTIVE=%s\n' "$xray_was_active"
+printf 'NGP_XRAY_PREVIOUS_SERVICE_ENABLED=%s\n' "$xray_was_enabled"
+printf 'NGP_XRAY_EXPECTED_CONFIG_SHA256=%s\n' "$xray_config_hash"
+printf 'NGP_XRAY_EXPECTED_META_SHA256=%s\n' "$xray_meta_hash"
+printf 'NGP_XRAY_OPERATION=%s\n' "$NGP_XRAY_OPERATION"
+echo NGP_XRAY_OPERATION_COMPLETE=1
+xray_complete=1

@@ -22,3 +22,5 @@ if [ "$NGP_ACTION" != stop ]; then
   [ "$(ngp_service_active "$XRAY_SERVICE" | tail -n 1)" = active ] || ngp_error xray_service_start_failed
 fi
 ngp_xray_status
+printf 'NGP_XRAY_OPERATION=control-%s\n' "$NGP_ACTION"
+echo NGP_XRAY_OPERATION_COMPLETE=1

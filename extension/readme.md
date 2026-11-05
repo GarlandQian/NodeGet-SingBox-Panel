@@ -34,6 +34,7 @@
 - XHTTP 使用面板专属 `nodeget-xray` 服务，不接管系统已有 Xray；支持独立状态读取、服务控制、配置检查、更新及失败回滚
 - XHTTP 服务端固定基线 Xray v26.10.21，客户端联调基线 Mihomo v1.19.33；导出已包含必需的 `support-x25519mlkem768=true` 兼容参数
 - XHTTP 首版仅直连、本机直出，不支持下一跳、CDN/反代、上下行分离、证书 TLS 或 HTTP/3；sing-box 格式无法导出 XHTTP
+- XHTTP 预检使用真实内核支持的 `config.stage.json`；任务回传、进程退出码和操作后置状态分别校验，缺失回执或执行失败时不将候选配置标记为已部署，错误详情会脱敏显示
 - VLESS Reality 密钥在添加配置时由面板本地生成
 - Reality 目标筛选会在节点 cache 目录下载 RealiTLScanner 和 RealityChecker
 - Reality 目标筛选只对用户输入的目标运行，不会自动生成扫描范围

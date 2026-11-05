@@ -13,12 +13,13 @@ import {
   buildXrayControlScript,
 } from "./scripts";
 import {
-  parseControlOutput,
-  parseDeployOutput,
+  parseConfirmedControlOutput,
+  parseConfirmedDeployOutput,
   parseReadStateOutput,
-  parseUpgradeOutput,
-  parseXrayOutput,
+  parseConfirmedUpgradeOutput,
+  parseConfirmedXrayOutput,
 } from "./state";
+import { wrapExecuteCommand, validateExecuteRecord, collectSensitiveValues } from "./execution";
 
 export function createNodegetClient() {
   return new WebSocketRPCClient(resolveWsOrigin());
@@ -108,7 +109,7 @@ async function runAgentTask(
     );
     const record = Array.isArray(rows) ? rows[0] : null;
     if (!record) continue;
-    if (record.success === true) {
+    if (record.success === true || (resultType === "execute" && record.success === false)) {
       return { taskId, record };
     }
     if (record.success === false) {
@@ -131,17 +132,18 @@ export async function runExecuteTask(
   args = [],
   options = {},
 ) {
+  const execution = wrapExecuteCommand(command, args);
   const result = await runAgentTask(
     client,
     token,
     targetUuid,
-    { execute: { cmd: command, args } },
+    { execute: { cmd: execution.cmd, args: execution.args } },
     "execute",
     { ...options, errorLabel: command },
   );
   return {
     ...result,
-    output: String(result.record.task_event_result?.execute || "").trim(),
+    ...validateExecuteRecord(result.record, execution.id, { sensitiveValues: [token, ...(options.sensitiveValues || [])].filter(Boolean) }),
   };
 }
 
@@ -200,9 +202,10 @@ export async function readNodeState(client, token, uuid, options = {}) {
 export async function deployXrayState(client, token, uuid, payload, options = {}) {
   const result = await runShell(client, token, uuid, buildXrayDeployScript(payload), {
     timeoutMs: 360000,
+    sensitiveValues: collectSensitiveValues(payload),
     ...options,
   });
-  return { ...parseXrayOutput(result.output), rawOutput: result.output };
+  return { ...parseConfirmedXrayOutput(result.output, payload.upgrade ? "upgrade" : "deploy"), rawOutput: result.output };
 }
 
 export async function controlXrayService(client, token, uuid, action, options = {}) {
@@ -210,15 +213,16 @@ export async function controlXrayService(client, token, uuid, action, options = 
     timeoutMs: 120000,
     ...options,
   });
-  return { ...parseXrayOutput(result.output), rawOutput: result.output };
+  return { ...parseConfirmedXrayOutput(result.output, `control-${action}`), rawOutput: result.output };
 }
 
 export async function deployNodeState(client, token, uuid, payload, options = {}) {
   const result = await runShell(client, token, uuid, buildDeployScript(payload), {
     timeoutMs: 360000,
+    sensitiveValues: collectSensitiveValues(payload),
     ...options,
   });
-  return { ...parseDeployOutput(result.output), rawOutput: result.output };
+  return { ...parseConfirmedDeployOutput(result.output), rawOutput: result.output };
 }
 
 export async function controlSingboxService(client, token, uuid, action, options = {}) {
@@ -226,15 +230,16 @@ export async function controlSingboxService(client, token, uuid, action, options
     timeoutMs: 120000,
     ...options,
   });
-  return { ...parseControlOutput(result.output), rawOutput: result.output };
+  return { ...parseConfirmedControlOutput(result.output, action), rawOutput: result.output };
 }
 
 export async function upgradeSingbox(client, token, uuid, payload = {}, options = {}) {
   const result = await runShell(client, token, uuid, buildUpgradeScript(payload), {
     timeoutMs: 360000,
+    sensitiveValues: collectSensitiveValues(payload),
     ...options,
   });
-  return { ...parseUpgradeOutput(result.output), rawOutput: result.output };
+  return { ...parseConfirmedUpgradeOutput(result.output), rawOutput: result.output };
 }
 
 export async function uninstallSingbox(client, token, uuid, options = {}) {

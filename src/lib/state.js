@@ -1,5 +1,6 @@
 import { isNodegetTag } from "./inbound";
 import { getEntryEngine } from "./protocols";
+import { XRAY_RELEASE } from "./xray";
 
 export const META_VERSION = 2;
 
@@ -141,6 +142,74 @@ export function parseXrayOutput(output) {
     oldVersion: scalars.XRAY_VERSION_OLD || "unknown",
     serviceEnabled: scalars.SERVICE_ENABLED || "unknown",
   };
+}
+
+function requireScalars(output, keys) {
+  const scalars = parseScalars(output);
+  for (const key of keys) {
+    const count = String(output).split(/\r?\n/).filter((line) => line.startsWith(`NGP_${key}=`)).length;
+    if (count !== 1 || !scalars[key]) throw new Error(`操作成功结果缺失或重复：${key}，请重新读取状态`);
+  }
+  return scalars;
+}
+
+const HASH = /^[a-f0-9]{64}$/;
+const SERVICE_STATES = ["active", "inactive", "failed"];
+const ENABLED_STATES = ["enabled", "disabled", "static", "indirect"];
+
+export function parseConfirmedXrayOutput(output, operation) {
+  const s = requireScalars(output, ["SERVICE_ACTIVE", "SERVICE_ENABLED", "SERVICE_MANAGER", "CONFIG_SHA256",
+    "META_SHA256", "XRAY_VERSION", "XRAY_OPERATION", "XRAY_OPERATION_COMPLETE"]);
+  const fail = () => { throw new Error("Xray 操作后置状态不符合预期，请重新读取节点状态；未采用候选配置"); };
+  if (s.XRAY_OPERATION_COMPLETE !== "1" || s.XRAY_OPERATION !== operation ||
+      !["systemd", "openrc"].includes(s.SERVICE_MANAGER) || !ENABLED_STATES.includes(s.SERVICE_ENABLED)) fail();
+  if (["deploy", "upgrade"].includes(operation)) {
+    requireScalars(output, ["CONFIG_FILE", "META_FILE", "XRAY_EXPECTED_CONFIG_SHA256", "XRAY_EXPECTED_META_SHA256"]);
+    if (s.XRAY_VERSION !== XRAY_RELEASE.slice(1) || !HASH.test(s.CONFIG_SHA256) || !HASH.test(s.META_SHA256) ||
+        s.CONFIG_SHA256 !== s.XRAY_EXPECTED_CONFIG_SHA256 || s.META_SHA256 !== s.XRAY_EXPECTED_META_SHA256 ||
+        !s.CONFIG_FILE.endsWith("/config.json") || s.META_FILE !== s.CONFIG_FILE.replace(/config\.json$/, "nodeget.json")) fail();
+    if (operation === "deploy" && (s.SERVICE_ACTIVE !== "active" || s.SERVICE_ENABLED !== "enabled")) fail();
+    if (operation === "upgrade") {
+      requireScalars(output, ["XRAY_VERSION_OLD", "XRAY_PREVIOUS_SERVICE_ACTIVE", "XRAY_PREVIOUS_SERVICE_ENABLED"]);
+      if (!SERVICE_STATES.includes(s.XRAY_PREVIOUS_SERVICE_ACTIVE) || s.SERVICE_ACTIVE !== s.XRAY_PREVIOUS_SERVICE_ACTIVE ||
+          s.SERVICE_ENABLED !== s.XRAY_PREVIOUS_SERVICE_ENABLED) fail();
+    }
+  } else {
+    if (!/^control-(start|stop|restart)$/.test(operation)) fail();
+    const stopped = operation === "control-stop";
+    if (s.SERVICE_ACTIVE !== (stopped ? "inactive" : "active") ||
+        (operation === "control-start" && s.SERVICE_ENABLED !== "enabled") ||
+        (!HASH.test(s.CONFIG_SHA256) && !(stopped && s.CONFIG_SHA256 === "absent")) ||
+        (!HASH.test(s.META_SHA256) && s.META_SHA256 !== "absent") ||
+        (!/^\d+\.\d+\.\d+$/.test(s.XRAY_VERSION) && !(stopped && s.XRAY_VERSION === "missing"))) fail();
+  }
+  return parseXrayOutput(output);
+}
+
+export function parseConfirmedDeployOutput(output) {
+  const s = requireScalars(output, ["SERVICE_ACTIVE", "SERVICE_MANAGER", "CONFIG_FILE", "META_FILE"]);
+  if (s.SERVICE_ACTIVE !== "active" || !["systemd", "openrc", "service"].includes(s.SERVICE_MANAGER)) {
+    throw new Error("sing-box 部署后服务未正常运行，请重新读取状态");
+  }
+  return parseDeployOutput(output);
+}
+
+export function parseConfirmedControlOutput(output, action) {
+  const s = requireScalars(output, ["SERVICE_ACTIVE", "SERVICE_ENABLED", "SERVICE_MANAGER"]);
+  if (!["systemd", "openrc", "service"].includes(s.SERVICE_MANAGER) ||
+      (action === "status" ? !SERVICE_STATES.includes(s.SERVICE_ACTIVE) : action === "stop" ? s.SERVICE_ACTIVE !== "inactive" : s.SERVICE_ACTIVE !== "active")) {
+    throw new Error("sing-box 服务操作后状态不符合预期，请重新读取状态");
+  }
+  return parseControlOutput(output);
+}
+
+export function parseConfirmedUpgradeOutput(output) {
+  const s = requireScalars(output, ["UPGRADE_STATUS", "SINGBOX_VERSION_OLD", "SINGBOX_VERSION_NEW", "RELEASE_TAG", "SERVICE_ACTIVE", "MIGRATION_COUNT"]);
+  if (!["upgraded", "migrated", "up-to-date"].includes(s.UPGRADE_STATUS) || !SERVICE_STATES.includes(s.SERVICE_ACTIVE) ||
+      !/^\d+\.\d+\.\d+$/.test(s.SINGBOX_VERSION_NEW) || s.RELEASE_TAG !== `v${s.SINGBOX_VERSION_NEW}` || !/^\d+$/.test(s.MIGRATION_COUNT)) {
+    throw new Error("sing-box 升级结果不完整或不符合预期，请重新读取状态");
+  }
+  return parseUpgradeOutput(output);
 }
 
 function migrateMeta(parsed) {

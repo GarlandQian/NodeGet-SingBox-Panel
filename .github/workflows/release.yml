@@ -32,13 +32,15 @@ jobs:
       - name: Write release notes
         run: |
           cat > release-notes.md <<'NOTES'
-          ## Changed
+          ## Fixed
 
-          - Adds optional isolated Xray management for VLESS + XHTTP + REALITY over HTTP/2 in stream-one mode.
-          - Exports VLESS URIs and Mihomo YAML with the required REALITY key-exchange compatibility option.
-          - Uses Xray v26.10.21 and Mihomo v1.19.33 as the verified interoperability baseline; keeps existing sing-box nodes unchanged.
-          - Separates service controls, state, configuration checks, version updates, and rollback by core.
-          - Verifies engine isolation, port conflicts, revision checks, file permissions, service ownership, and failed-deployment rollback.
+          - Fixes XHTTP installation preflight by using config.stage.json, a filename accepted by the pinned Xray v26.10.21 loader.
+          - Separates NodeGet task delivery, process exit status, and operation postconditions to prevent false deployment success.
+          - Requires request-correlated completion receipts, valid version/configuration digests, and operation-specific service state before updating the panel.
+          - Preserves child-script cleanup and rollback traps, and shows redacted diagnostics without saving configuration credentials to browser history.
+          - Adds production-staging and lifecycle regression checks, including rejection of the old .stage path, invalid configurations, truncated results, stopped-service updates, and rollback.
+
+          The staging checks were also run locally with real Xray v26.10.21; URI/YAML IPv4/IPv6 TCP/UDP interoperability was reverified with Mihomo v1.19.33. Linux service management was simulated, not tested on a production node.
 
           Initial XHTTP scope: direct connections and direct egress only; no next-hop, CDN/reverse proxy, split download, certificate TLS, or HTTP/3 support.
           NOTES

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { frameExecuteOutput } from "./execute-fixture.mjs";
 import { createPrivateKey, createPublicKey } from "node:crypto";
 import {
   buildSingBoxConfig,
@@ -62,7 +63,11 @@ function mockTaskClient(taskEventResult) {
       calls.push({ method, params });
       if (method === "task_create_task") return { id: 42 };
       if (method === "task_query") {
-        return [{ success: true, task_event_result: taskEventResult }];
+        const result = { ...taskEventResult };
+        if (typeof result.execute === "string") {
+          result.execute = frameExecuteOutput(calls.find((call) => call.method === "task_create_task").params.task_type.execute, result.execute);
+        }
+        return [{ success: true, task_event_result: result }];
       }
       throw new Error(`unexpected RPC method: ${method}`);
     },
@@ -633,5 +638,6 @@ const hysteriaOutbound = JSON.parse(
 assert.deepEqual(hysteriaOutbound.server_ports, ["30000:30100"]);
 assert.equal("server_port" in hysteriaOutbound, false);
 
+await import("./verify-execution.mjs");
 await import("./verify-xhttp.mjs");
 console.log(`verified ${PROTOCOLS.length} protocols and deployment safety invariants`);

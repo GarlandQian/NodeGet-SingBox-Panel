@@ -32,7 +32,7 @@ ngp_xray_check_paths() {
     if ngp_root test -e "$path" && ! ngp_root test -d "$path"; then ngp_error xray_unmanaged_paths; fi
   done
   for path in "$XRAY_BIN" "$XRAY_CONFIG" "$XRAY_META" "$XRAY_BIN.bak" "$XRAY_CONFIG.bak" "$XRAY_META.bak" \
-    "$XRAY_BIN.stage" "$XRAY_ROOT/config.stage" "$XRAY_ROOT/meta.stage" "$XRAY_ROOT/managed-by-nodeget"; do
+    "$XRAY_BIN.stage" "$XRAY_ROOT/config.stage.json" "$XRAY_ROOT/meta.stage" "$XRAY_ROOT/managed-by-nodeget"; do
     if ngp_root test -L "$path"; then ngp_error xray_symlink_refused; fi
     if ngp_root test -e "$path" && ! ngp_root test -f "$path"; then ngp_error xray_unmanaged_paths; fi
   done

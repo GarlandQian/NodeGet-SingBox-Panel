@@ -259,6 +259,7 @@ const filteredHistory = computed(() => {
 
 function errorMessage(error) {
   const raw = error instanceof Error ? error.message : String(error);
+  if (raw.includes("xray_rollback_failed")) return "Xray 自动回滚失败，请检查节点上的 .bak 备份并人工恢复";
   const errors = {
     xray_operation_locked: "Xray 正在被其他操作占用，请稍后重新读取状态；异常退出的残留锁需人工核对后处理",
     xray_config_changed_since_read: "Xray 配置已被其他操作修改，请重新读取状态",
@@ -272,6 +273,7 @@ function errorMessage(error) {
     xray_release_metadata_failed: "无法读取 Xray 官方发布信息，请检查节点网络",
     xray_release_download_failed: "下载 Xray 官方发布包失败，请检查节点网络",
     xray_config_rejected: "配置未通过 Xray 检查，未替换现有配置",
+    xray_commit_hash_mismatch: "部署后摘要与候选文件不一致，已尝试回滚，请重新读取状态",
     xray_restart_failed_rolled_back: "Xray 重启失败，已尝试回滚，请重新读取状态",
     xray_unhealthy_rolled_back: "Xray 启动后状态异常，已尝试回滚，请重新读取状态",
     xray_rollback_failed: "Xray 自动回滚失败，请检查节点上的 .bak 备份并人工恢复",
@@ -280,7 +282,8 @@ function errorMessage(error) {
     xray_config_missing: "尚无 Xray 配置，请先添加 XHTTP 入站",
     xray_service_start_failed: "Xray 启动/重启后状态异常，请重新读取节点状态和检查服务日志",
   };
-  return Object.entries(errors).find(([code]) => raw.includes(code))?.[1] || raw;
+  const friendly = Object.entries(errors).find(([code]) => raw.includes(code))?.[1];
+  return friendly && raw.includes("xray_config_rejected") ? `${friendly}\n${raw}` : friendly || raw;
 }
 
 function upgradeErrorMessage(error) {
@@ -821,8 +824,8 @@ async function saveInbound() {
       `${action === "update-inbound" ? "入站修改已保存" : "入站已添加"}${nextHopSuffix}`,
     );
   } catch (e) {
-    if (isAbort(e)) return;
     stateReady.value = false;
+    if (isAbort(e)) return;
     reportCommandFailure(errorMessage(e));
     pushRun(action, false, errorMessage(e));
   } finally {
@@ -863,8 +866,8 @@ async function deleteInbound() {
     pushRun("delete-inbound", true, result.rawOutput);
     showNotification("入站已删除");
   } catch (e) {
-    if (isAbort(e)) return;
     stateReady.value = false;
+    if (isAbort(e)) return;
     reportCommandFailure(errorMessage(e));
     pushRun("delete-inbound", false, errorMessage(e));
   } finally {
@@ -905,6 +908,7 @@ async function controlAction(action) {
     };
     showNotification(`${engine === "xray" ? "Xray" : "sing-box"}：${successMessages[action] || "服务操作已完成"}`);
   } catch (e) {
+    stateReady.value = false;
     if (isAbort(e)) return;
     reportCommandFailure(errorMessage(e));
     pushRun(action, false, errorMessage(e));
@@ -990,6 +994,7 @@ async function upgradeSingboxAction() {
       : "";
     showNotification(`${versionMessage}${migrationMessage}`, "success", 6000);
   } catch (e) {
+    stateReady.value = false;
     if (isAbort(e)) return;
     const rawMessage = errorMessage(e);
     reportCommandFailure(`升级失败：${upgradeErrorMessage(e)}`);
@@ -1025,8 +1030,8 @@ async function upgradeXrayAction() {
     pushRun("upgrade", true, result.rawOutput, { engine: "xray" });
     showNotification(`Xray 已更新至兼容基线 ${result.version}`);
   } catch (e) {
-    if (isAbort(e)) return;
     stateReady.value = false;
+    if (isAbort(e)) return;
     reportCommandFailure(`Xray 更新失败，请重新读取状态：${errorMessage(e)}`);
     pushRun("upgrade", false, errorMessage(e), { engine: "xray" });
   } finally {
@@ -1081,8 +1086,8 @@ async function uninstallAll() {
     pushRun("uninstall", true, [...outputs, result.rawOutput].filter(Boolean).join("\n"));
     showNotification("面板配置已移除");
   } catch (e) {
-    if (isAbort(e)) return;
     stateReady.value = false;
+    if (isAbort(e)) return;
     reportCommandFailure(errorMessage(e));
     pushRun("uninstall", false, errorMessage(e));
   } finally {
