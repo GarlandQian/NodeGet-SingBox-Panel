@@ -190,6 +190,9 @@ const VLESS_PARAMS = new Set([
 
 function parseVless(rawUri, tag) {
   const url = parseUrl(rawUri, "VLESS URI");
+  if (url.searchParams.get("type")?.toLowerCase() === "xhttp") {
+    throw new Error("sing-box 下一跳不支持 XHTTP，请使用其他受支持的下一跳协议");
+  }
   assertKnownParams(url.searchParams, VLESS_PARAMS);
   const uuid = decodeComponent(url.username, "VLESS UUID");
   if (!uuid) throw new Error("VLESS URI 缺少 UUID");

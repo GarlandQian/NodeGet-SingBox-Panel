@@ -5,6 +5,9 @@ import { useSingboxPanel } from "@/composables/useSingboxPanel";
 const {
   inbounds,
   foreignInbounds,
+  xrayForeignInbounds,
+  commandRunning,
+  batchRunning,
   selectedInboundId,
   selectedUuid,
   loadingState,
@@ -41,14 +44,14 @@ function endpointLabel(entry) {
         </button>
         <button
           class="button small"
-          :disabled="!selectedUuid || loadingState"
+          :disabled="!selectedUuid || loadingState || commandRunning || batchRunning"
           @click="refreshState({ feedback: true })"
         >
           {{ loadingState ? "读取中..." : "重新读取" }}
         </button>
         <button
           class="button small primary"
-          :disabled="!selectedUuid"
+          :disabled="!selectedUuid || commandRunning || batchRunning"
           @click="selectInbound(null)"
         >
           + 新建入站
@@ -61,7 +64,7 @@ function endpointLabel(entry) {
         :key="entry.id"
         class="inbound-chip"
         :class="{ 'is-active': entry.id === selectedInboundId }"
-        :disabled="batchMode"
+        :disabled="batchMode || commandRunning || batchRunning"
         :title="entry.tag"
         @click="selectInbound(entry.id)"
       >
@@ -78,8 +81,8 @@ function endpointLabel(entry) {
         还没有 nodeget 入站。点 "+ 新建入站" 创建第一个。
       </div>
     </div>
-    <div v-if="foreignInbounds.length" class="inbound-foreign">
-      检测到 {{ foreignInbounds.length }} 个面板未管理的入站，将原样保留。
+    <div v-if="foreignInbounds.length + xrayForeignInbounds.length" class="inbound-foreign">
+      检测到 {{ foreignInbounds.length + xrayForeignInbounds.length }} 个面板未管理的入站，将原样保留。
     </div>
     <div v-if="stateError" class="empty">{{ stateError }}</div>
   </div>

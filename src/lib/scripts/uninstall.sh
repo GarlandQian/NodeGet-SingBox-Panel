@@ -1,4 +1,4 @@
-ngp_root rm -rf /etc/nodeget-singbox-panel
+ngp_root rm -f /etc/nodeget-singbox-panel/nodeget.json /etc/nodeget-singbox-panel/nodeget.json.bak
 ngp_root rm -f /etc/sing-box/nodeget.json
 
 # Remove all nodeget-singbox-portjump-* services

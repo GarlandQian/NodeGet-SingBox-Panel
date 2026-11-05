@@ -76,6 +76,16 @@ function inboundToClashProxy(inbound, fallbackLabel) {
     }
     if (protocol.transport === "tcp") {
       proxy.network = "tcp";
+    } else if (protocol.transport === "xhttp") {
+      proxy.network = "xhttp";
+      proxy.alpn = ["h2"];
+      proxy["packet-encoding"] = "xudp";
+      proxy["reality-opts"]["support-x25519mlkem768"] = true;
+      proxy["xhttp-opts"] = {
+        path: form.path || "/",
+        mode: "stream-one",
+        ...(form.transportHost ? { host: form.transportHost } : {}),
+      };
     } else if (protocol.transport === "ws") {
       proxy.network = "ws";
       proxy["ws-opts"] = {
@@ -305,6 +315,9 @@ export function buildClashYamlExport(inbounds, label) {
 }
 
 export function buildSingboxOutboundsExport(inbounds, label) {
+  if (inbounds.some((entry) => getProtocol(entry.protocolId)?.transport === "xhttp")) {
+    throw new Error("sing-box 不支持 XHTTP，请使用 URI 或 Mihomo YAML 导出");
+  }
   const outbounds = inbounds.map((inbound) => {
     const protocol = getProtocol(inbound.protocolId);
     if (!protocol) return null;

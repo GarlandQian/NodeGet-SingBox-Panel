@@ -167,7 +167,10 @@ function fieldError(key) {
       </label>
     </div>
 
-    <section class="next-hop-section">
+    <div v-if="protocol?.engine === 'xray'" class="field-hint">
+      Xray 独立服务 · REALITY · HTTP/2 · stream-one。首版仅直连、本机直出，不支持下一跳、CDN 或上下行分离。
+    </div>
+    <section v-else class="next-hop-section">
       <label class="next-hop-toggle">
         <input v-model="form.nextHopEnabled" type="checkbox" />
         <span class="next-hop-switch" aria-hidden="true" />

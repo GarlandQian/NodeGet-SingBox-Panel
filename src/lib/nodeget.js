@@ -9,12 +9,15 @@ import {
   buildRealityScanScript,
   buildUninstallScript,
   buildUpgradeScript,
+  buildXrayDeployScript,
+  buildXrayControlScript,
 } from "./scripts";
 import {
   parseControlOutput,
   parseDeployOutput,
   parseReadStateOutput,
   parseUpgradeOutput,
+  parseXrayOutput,
 } from "./state";
 
 export function createNodegetClient() {
@@ -161,10 +164,20 @@ async function runShell(client, token, uuid, script, options = {}) {
 }
 
 export async function readNodeState(client, token, uuid, options = {}) {
-  const result = await runShell(client, token, uuid, buildReadStateScript(), {
-    timeoutMs: 60000,
-    ...options,
-  });
+  let result;
+  try {
+    result = await runShell(client, token, uuid, buildReadStateScript(), {
+      timeoutMs: 60000,
+      ...options,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/NGP_(?:XRAY_)?(?:CONFIG|META)_BEGIN/.test(message)) {
+      const codes = message.match(/^NGP_ERROR=[A-Za-z0-9_-]+$/gm) || [];
+      throw new Error(`节点状态读取失败，原始配置输出已隐藏。${codes.join("；")}`);
+    }
+    throw error;
+  }
   const state = parseReadStateOutput(result.output);
   if (state.outputTruncated) {
     throw new Error("节点状态输出被 NodeGet 截断，已停止操作以避免覆盖现有配置");
@@ -175,7 +188,29 @@ export async function readNodeState(client, token, uuid, options = {}) {
   if (state.metaParseError) {
     throw new Error("NodeGet sing-box 元数据读回不完整或 JSON 无效，已停止操作");
   }
+  if (state.xray.configParseError || state.xray.metaParseError) {
+    throw new Error("Xray 配置或元数据不完整，已停止操作以避免覆盖现有配置");
+  }
+  if (!state.xray.configSha256 || !state.xray.metaSha256 || state.scalars.XRAY_STATE_COMPLETE !== "1") {
+    throw new Error("Xray 状态读回不完整，请重新读取后再操作");
+  }
   return { ...state, rawOutput: result.output };
+}
+
+export async function deployXrayState(client, token, uuid, payload, options = {}) {
+  const result = await runShell(client, token, uuid, buildXrayDeployScript(payload), {
+    timeoutMs: 360000,
+    ...options,
+  });
+  return { ...parseXrayOutput(result.output), rawOutput: result.output };
+}
+
+export async function controlXrayService(client, token, uuid, action, options = {}) {
+  const result = await runShell(client, token, uuid, buildXrayControlScript(action), {
+    timeoutMs: 120000,
+    ...options,
+  });
+  return { ...parseXrayOutput(result.output), rawOutput: result.output };
 }
 
 export async function deployNodeState(client, token, uuid, payload, options = {}) {

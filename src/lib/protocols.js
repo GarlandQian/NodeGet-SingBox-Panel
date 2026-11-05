@@ -153,6 +153,17 @@ const SHARED_TLS_FIELDS = ["handshakeHost", "certPath", "keyPath"];
 
 export const PROTOCOLS = [
   {
+    id: "vless-xhttp-reality",
+    label: "VLESS-XHTTP-REALITY (Xray)",
+    engine: "xray",
+    family: "vless",
+    transport: "xhttp",
+    tlsMode: "reality",
+    secretKind: "uuid-reality",
+    fields: ["endpointHost", "endpointPort", "handshakeHost", "handshakePort", "transportHost", "path", "uuid", "shortId"],
+    requiredFields: ["endpointHost", "endpointPort", "handshakeHost", "handshakePort", "path", "uuid", "shortId"],
+  },
+  {
     id: "vless-reality",
     label: "VLESS-REALITY",
     family: "vless",
@@ -639,6 +650,7 @@ export const PROTOCOL_GROUPS = [
   {
     label: "VLESS",
     protocols: [
+      "vless-xhttp-reality",
       "vless-reality",
       "vless-http2-reality",
       "vless-ws-tls",
@@ -678,6 +690,20 @@ export const PROTOCOL_GROUPS = [
 
 export function getProtocol(protocolId) {
   return PROTOCOLS.find((protocol) => protocol.id === protocolId) || null;
+}
+
+export function getProtocolEngine(protocolId) {
+  const protocol = getProtocol(protocolId);
+  if (!protocol) throw new Error(`未知协议：${protocolId}`);
+  return protocol.engine || "singbox";
+}
+
+export function getEntryEngine(entry) {
+  const engine = getProtocolEngine(entry.protocolId);
+  if (entry.engine && entry.engine !== engine) {
+    throw new Error("入站元数据的内核与协议不匹配，请修复元数据后重试");
+  }
+  return engine;
 }
 
 export function getProtocolFields(protocolId) {

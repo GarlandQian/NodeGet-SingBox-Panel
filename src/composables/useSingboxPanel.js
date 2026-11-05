@@ -6,17 +6,17 @@ import {
   randomHex,
   shadowsocksPasswordBytes,
 } from "@/lib/singbox";
-import { getProtocol } from "@/lib/protocols";
+import { getProtocol, getProtocolEngine, getEntryEngine } from "@/lib/protocols";
 import { parseExtensionContext } from "@/lib/context";
 import {
-  buildSingBoxConfig,
-  buildSingBoxInbound,
   emptyInboundForm,
   makeInboundId,
   makeInboundTag,
 } from "@/lib/inbound";
-import { makeMeta } from "@/lib/state";
-import { buildManagedNextHops, parseNextHopUri } from "@/lib/nextHop";
+import { redactStateOutput } from "@/lib/state";
+import { validateXhttpForm, validateXhttpShareUri, XRAY_RELEASE } from "@/lib/xray";
+import { parseNextHopUri } from "@/lib/nextHop";
+import { buildEngineDeployment, assertPortAvailable } from "@/lib/deployment";
 import { migrateSingBoxConfigFor114 } from "@/lib/configMigration";
 import { normalizeRealityDomain, parseRealityTargetOutput } from "@/lib/realityTools";
 import { generateLocalRealityKeypair } from "@/lib/realityKeypair";
@@ -26,6 +26,8 @@ import {
   controlSingboxService,
   createNodegetClient,
   deployNodeState,
+  deployXrayState,
+  controlXrayService,
   listNodeNames,
   listNodeUuids,
   readNodeIpAddresses,
@@ -97,6 +99,8 @@ const inbounds = ref([]);
 const foreignInbounds = ref([]);
 const baseConfig = ref(null);
 const baseConfigSha256 = ref("");
+const xrayState = ref(null);
+const xrayForeignInbounds = computed(() => xrayState.value?.foreignInbounds || []);
 
 const selectedInboundId = ref(null);
 const selectedProtocolId = ref("vless-reality");
@@ -192,6 +196,8 @@ function newAbortController() {
 
 const protocol = computed(() => getProtocol(selectedProtocolId.value));
 const isEditing = computed(() => selectedInboundId.value != null);
+const serviceEngine = computed(() => getProtocolEngine(selectedProtocolId.value));
+const serviceLabel = computed(() => serviceEngine.value === "xray" ? "Xray" : "sing-box");
 
 const currentNodeName = computed(() => {
   const name = nodeNameMap.value[selectedUuid.value];
@@ -252,7 +258,29 @@ const filteredHistory = computed(() => {
 });
 
 function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
+  const raw = error instanceof Error ? error.message : String(error);
+  const errors = {
+    xray_operation_locked: "Xray 正在被其他操作占用，请稍后重新读取状态；异常退出的残留锁需人工核对后处理",
+    xray_config_changed_since_read: "Xray 配置已被其他操作修改，请重新读取状态",
+    xray_meta_changed_since_read: "Xray 元数据已被其他操作修改，请重新读取状态",
+    xray_unmanaged_paths: "检测到非面板管理的 Xray 路径，已停止以避免覆盖",
+    xray_symlink_refused: "Xray 路径包含符号链接，已停止以避免覆盖其他文件",
+    xray_service_not_owned: "nodeget-xray 服务已被其他程序占用，未覆盖现有服务",
+    xray_version_not_baseline: `Xray 版本不在已验证基线 ${XRAY_RELEASE}，请先明确更新到兼容基线`,
+    xray_release_checksum_mismatch: "Xray 发布包 SHA-256 校验失败，未替换现有版本",
+    xray_release_digest_missing: "Xray 官方资产缺少有效 SHA-256 摘要，已停止安装",
+    xray_release_metadata_failed: "无法读取 Xray 官方发布信息，请检查节点网络",
+    xray_release_download_failed: "下载 Xray 官方发布包失败，请检查节点网络",
+    xray_config_rejected: "配置未通过 Xray 检查，未替换现有配置",
+    xray_restart_failed_rolled_back: "Xray 重启失败，已尝试回滚，请重新读取状态",
+    xray_unhealthy_rolled_back: "Xray 启动后状态异常，已尝试回滚，请重新读取状态",
+    xray_rollback_failed: "Xray 自动回滚失败，请检查节点上的 .bak 备份并人工恢复",
+    xray_unsupported_arch: "当前节点架构不受 Xray 官方发布包支持",
+    xray_unsupported_service_manager: "Xray 首版需要 systemd 或 OpenRC 服务管理器",
+    xray_config_missing: "尚无 Xray 配置，请先添加 XHTTP 入站",
+    xray_service_start_failed: "Xray 启动/重启后状态异常，请重新读取节点状态和检查服务日志",
+  };
+  return Object.entries(errors).find(([code]) => raw.includes(code))?.[1] || raw;
 }
 
 function upgradeErrorMessage(error) {
@@ -350,6 +378,10 @@ async function copyText(text) {
 
 function validateGeneratedUri(uri) {
   try {
+    if (new URL(uri).searchParams.get("type") === "xhttp") {
+      validateXhttpShareUri(uri);
+      return;
+    }
     parseNextHopUri(uri, "nodeget-copy-validation");
   } catch (error) {
     throw new Error(`生成的 URI 无效：${errorMessage(error)}`);
@@ -381,9 +413,13 @@ function parsePort(value, label) {
 
 function selectProtocol(id) {
   selectedProtocolId.value = id;
+  if (getProtocolEngine(id) === "xray") {
+    form.nextHopEnabled = false;
+    form.nextHopUri = "";
+  }
   validation.reset();
   if (!isEditing.value) {
-    if (id === "vless-reality" || id === "vless-http2-reality") {
+    if (getProtocol(id)?.tlsMode === "reality") {
       form.privateKey = "";
       form.publicKey = "";
       form.shortId = randomHex(8);
@@ -514,8 +550,9 @@ async function refreshState(options = {}) {
     singboxVersion.value = state.singboxVersion;
     baseConfig.value = state.config;
     baseConfigSha256.value = state.configSha256;
+    xrayState.value = state.xray;
     foreignInbounds.value = state.foreignInbounds;
-    inbounds.value = state.meta.inbounds || [];
+    inbounds.value = [...(state.meta.inbounds || []), ...(state.xray.meta.inbounds || [])];
     stateReady.value = true;
     if (
       selectedInboundId.value != null &&
@@ -544,7 +581,7 @@ async function refreshState(options = {}) {
       }
     }
 
-    pushRun("read-state", true, state.rawOutput);
+    pushRun("read-state", true, redactStateOutput(state.rawOutput));
     if (appliedAddress) {
       showNotification(`已自动填入节点 IP：${appliedAddress}`);
     } else if (
@@ -575,22 +612,16 @@ function buildInboundEntry({ id, protocolId, formSnapshot }) {
     id: id || makeInboundId(),
     tag: makeInboundTag(protocolId, port),
     protocolId,
+    engine: getProtocolEngine(protocolId),
     form: { ...formSnapshot, endpointPort: port },
-    createdAt: id ? undefined : Date.now(),
+    createdAt: id ? inbounds.value.find((entry) => entry.id === id)?.createdAt : Date.now(),
     updatedAt: Date.now(),
   };
 }
 
 function detectPortConflict(targetTag, port) {
-  for (const existing of inbounds.value) {
-    if (existing.id === selectedInboundId.value) continue;
-    if (existing.form.endpointPort === port) {
-      throw new Error(`端口 ${port} 已被入站 ${existing.tag} 占用`);
-    }
-    if (existing.tag === targetTag) {
-      throw new Error(`入站 tag 冲突：${targetTag}`);
-    }
-  }
+  assertPortAvailable({ entries: inbounds.value, foreign: [...foreignInbounds.value, ...xrayForeignInbounds.value],
+    port, tag: targetTag, ignoreId: selectedInboundId.value });
 }
 
 function portJumpServiceName(tag) {
@@ -615,20 +646,17 @@ function validatePortJumpForm(formSnapshot, protocolId, port) {
   return canonicalPortJumpRange(raw);
 }
 
-function validateNextHopForm(formSnapshot) {
+function validateNextHopForm(formSnapshot, protocolId = selectedProtocolId.value) {
+  if (getProtocolEngine(protocolId) === "xray") {
+    validateXhttpForm(formSnapshot);
+    return;
+  }
   if (formSnapshot.nextHopEnabled !== true) return;
   parseNextHopUri(formSnapshot.nextHopUri);
 }
 
-function buildConfigForEntries(entries, foreign, base) {
-  const { outbounds, routeRules } = buildManagedNextHops(entries);
-  return buildSingBoxConfig({
-    inbounds: entries.map((it) => buildSingBoxInbound(it.protocolId, it.form)),
-    foreignInbounds: foreign,
-    baseConfig: base,
-    managedOutbounds: outbounds,
-    managedRouteRules: routeRules,
-  });
+function deploymentSnapshot() {
+  return { config: baseConfig.value, foreignInbounds: foreignInbounds.value, xray: xrayState.value };
 }
 
 async function syncPortJump(token, uuid, ctrl, before, after) {
@@ -682,6 +710,11 @@ async function ensureRealityKeypair() {
 }
 
 function buildPayload({ replaceId = null, dropId = null } = {}) {
+  const oldEntry = inbounds.value.find((entry) => entry.id === (dropId ?? replaceId));
+  const engine = dropId != null ? getEntryEngine(oldEntry) : serviceEngine.value;
+  if (replaceId != null && oldEntry?.protocolId !== selectedProtocolId.value) {
+    throw new Error("编辑入站不可更换协议或内核，请删除后新建");
+  }
   let next;
   if (replaceId != null) {
     const port = parsePort(form.endpointPort, "端口");
@@ -711,13 +744,29 @@ function buildPayload({ replaceId = null, dropId = null } = {}) {
     ];
   }
 
-  const config = buildConfigForEntries(
-    next,
-    foreignInbounds.value,
-    baseConfig.value,
-  );
-  const meta = makeMeta(next);
-  return { config, meta, nextInbounds: next };
+  return buildEngineDeployment(engine, next, deploymentSnapshot());
+}
+
+async function persistPayload(token, uuid, ctrl, payload) {
+  if (payload.engine === "xray") {
+    return deployXrayState(client, token, uuid, payload, { signal: ctrl.signal });
+  }
+  return deployNodeState(client, token, uuid, payload, { signal: ctrl.signal });
+}
+
+function applyDeployResult(payload, result) {
+  if (payload.engine === "xray") {
+    xrayState.value = {
+      ...xrayState.value, config: payload.config, meta: payload.meta,
+      configSha256: result.configSha256, metaSha256: result.metaSha256,
+      serviceActive: result.serviceActive, serviceEnabled: result.serviceEnabled, version: result.version,
+    };
+  } else {
+    baseConfig.value = payload.config;
+    baseConfigSha256.value = result.configSha256;
+    serviceActive.value = result.serviceActive;
+  }
+  inbounds.value = payload.nextInbounds;
 }
 
 async function saveInbound() {
@@ -758,21 +807,12 @@ async function saveInbound() {
   try {
     await ensureRealityKeypair();
     const replaceId = isEditing.value ? selectedInboundId.value : null;
-    const { config, meta, nextInbounds } = buildPayload({ replaceId });
-    const result = await deployNodeState(
-      client,
-      token,
-      uuid,
-      { config, meta },
-      { signal: ctrl.signal },
-    );
-    await syncPortJump(token, uuid, ctrl, before, nextInbounds);
-    baseConfig.value = config;
-    baseConfigSha256.value = result.configSha256;
-    inbounds.value = nextInbounds;
-    serviceActive.value = result.serviceActive;
+    const payload = buildPayload({ replaceId });
+    const result = await persistPayload(token, uuid, ctrl, payload);
+    applyDeployResult(payload, result);
+    await syncPortJump(token, uuid, ctrl, before, payload.nextInbounds);
     if (!isEditing.value) {
-      const newest = nextInbounds[nextInbounds.length - 1];
+      const newest = payload.nextInbounds[payload.nextInbounds.length - 1];
       if (newest) selectedInboundId.value = newest.id;
     }
     pushRun(action, true, result.rawOutput);
@@ -782,6 +822,7 @@ async function saveInbound() {
     );
   } catch (e) {
     if (isAbort(e)) return;
+    stateReady.value = false;
     reportCommandFailure(errorMessage(e));
     pushRun(action, false, errorMessage(e));
   } finally {
@@ -814,24 +855,16 @@ async function deleteInbound() {
   const ctrl = newAbortController();
   commandRunning.value = true;
   try {
-    const { config, meta, nextInbounds } = buildPayload({ dropId });
-    const result = await deployNodeState(
-      client,
-      token,
-      uuid,
-      { config, meta },
-      { signal: ctrl.signal },
-    );
-    await syncPortJump(token, uuid, ctrl, before, nextInbounds);
-    baseConfig.value = config;
-    baseConfigSha256.value = result.configSha256;
-    inbounds.value = nextInbounds;
-    serviceActive.value = result.serviceActive;
+    const payload = buildPayload({ dropId });
+    const result = await persistPayload(token, uuid, ctrl, payload);
+    applyDeployResult(payload, result);
+    await syncPortJump(token, uuid, ctrl, before, payload.nextInbounds);
     selectInbound(null);
     pushRun("delete-inbound", true, result.rawOutput);
     showNotification("入站已删除");
   } catch (e) {
     if (isAbort(e)) return;
+    stateReady.value = false;
     reportCommandFailure(errorMessage(e));
     pushRun("delete-inbound", false, errorMessage(e));
   } finally {
@@ -854,18 +887,23 @@ async function controlAction(action) {
   const ctrl = newAbortController();
   commandRunning.value = true;
   try {
-    const result = await controlSingboxService(client, token, uuid, action, {
+    const engine = serviceEngine.value;
+    const result = await (engine === "xray" ? controlXrayService : controlSingboxService)(client, token, uuid, action, {
       signal: ctrl.signal,
     });
-    serviceActive.value = result.serviceActive;
-    serviceEnabled.value = result.serviceEnabled;
-    pushRun(action, true, result.rawOutput);
+    if (engine === "xray") {
+      xrayState.value = { ...xrayState.value, serviceActive: result.serviceActive, serviceEnabled: result.serviceEnabled };
+    } else {
+      serviceActive.value = result.serviceActive;
+      serviceEnabled.value = result.serviceEnabled;
+    }
+    pushRun(action, true, result.rawOutput, { engine });
     const successMessages = {
       start: "服务已设为开机自启并立即启动",
       stop: "服务已停止",
       restart: "服务已重启",
     };
-    showNotification(successMessages[action] || "服务操作已完成");
+    showNotification(`${engine === "xray" ? "Xray" : "sing-box"}：${successMessages[action] || "服务操作已完成"}`);
   } catch (e) {
     if (isAbort(e)) return;
     reportCommandFailure(errorMessage(e));
@@ -962,6 +1000,41 @@ async function upgradeSingboxAction() {
   }
 }
 
+async function upgradeXrayAction() {
+  commandError.value = "";
+  if (!stateReady.value || !xrayState.value?.config) {
+    reportCommandFailure("请先读取状态，并添加 XHTTP 入站完成 Xray 安装");
+    return;
+  }
+  const confirmed = await requestConfirmation({
+    title: "更新 Xray 兼容基线",
+    message: `确认将面板专属 Xray 更新/修复为 ${XRAY_RELEASE}？不会跟随 latest，也不会操作其他 Xray 或 sing-box。下载、校验或重启失败时回滚。`,
+    confirmLabel: "确认更新",
+  });
+  if (!confirmed) return;
+  const ctrl = newAbortController();
+  commandRunning.value = true;
+  showNotification("正在下载、校验并更新 Xray…", "info", 6000);
+  try {
+    const result = await deployXrayState(client, requireToken(), requireSelectedUuid(), {
+      upgrade: true,
+      configSha256: xrayState.value.configSha256,
+      metaSha256: xrayState.value.metaSha256,
+    }, { signal: ctrl.signal });
+    xrayState.value = { ...xrayState.value, ...result };
+    pushRun("upgrade", true, result.rawOutput, { engine: "xray" });
+    showNotification(`Xray 已更新至兼容基线 ${result.version}`);
+  } catch (e) {
+    if (isAbort(e)) return;
+    stateReady.value = false;
+    reportCommandFailure(`Xray 更新失败，请重新读取状态：${errorMessage(e)}`);
+    pushRun("upgrade", false, errorMessage(e), { engine: "xray" });
+  } finally {
+    if (pendingAbort === ctrl) pendingAbort = null;
+    commandRunning.value = false;
+  }
+}
+
 async function uninstallAll() {
   commandError.value = "";
   if (!stateReady.value) {
@@ -970,7 +1043,7 @@ async function uninstallAll() {
   }
   const confirmed = await requestConfirmation({
     title: "移除面板配置",
-    message: "确认移除面板管理的入站和端口跳跃？其他 sing-box 配置、程序和服务将保留。",
+    message: "确认移除两个内核中面板管理的入站、下一跳和端口跳跃？其他配置、程序和服务将保留；按内核分别执行，若部分失败需重新读取状态。",
     confirmLabel: "确认移除",
     danger: true,
   });
@@ -990,34 +1063,26 @@ async function uninstallAll() {
   const ctrl = newAbortController();
   commandRunning.value = true;
   try {
-    const before = inbounds.value.slice();
-    let rawOutput = "";
-    if (before.length) {
-      const config = buildSingBoxConfig({
-        inbounds: [],
-        foreignInbounds: foreignInbounds.value,
-        baseConfig: baseConfig.value,
-      });
-      const deployResult = await deployNodeState(
-        client,
-        token,
-        uuid,
-        { config, meta: makeMeta([]) },
-        { signal: ctrl.signal },
-      );
-      await syncPortJump(token, uuid, ctrl, before, []);
-      baseConfig.value = config;
-      baseConfigSha256.value = deployResult.configSha256;
-      serviceActive.value = deployResult.serviceActive;
-      rawOutput = deployResult.rawOutput;
+    const outputs = [];
+    for (const engine of ["singbox", "xray"]) {
+      const before = inbounds.value.slice();
+      const managed = before.filter((entry) => getEntryEngine(entry) === engine);
+      if (!managed.length) continue;
+      const payload = buildEngineDeployment(engine,
+        before.filter((entry) => getEntryEngine(entry) !== engine), deploymentSnapshot());
+      const result = await persistPayload(token, uuid, ctrl, payload);
+      applyDeployResult(payload, result);
+      await syncPortJump(token, uuid, ctrl, before, payload.nextInbounds);
+      outputs.push(result.rawOutput);
     }
     const result = await uninstallSingbox(client, token, uuid, { signal: ctrl.signal });
     inbounds.value = [];
     selectInbound(null);
-    pushRun("uninstall", true, [rawOutput, result.rawOutput].filter(Boolean).join("\n"));
+    pushRun("uninstall", true, [...outputs, result.rawOutput].filter(Boolean).join("\n"));
     showNotification("面板配置已移除");
   } catch (e) {
     if (isAbort(e)) return;
+    stateReady.value = false;
     reportCommandFailure(errorMessage(e));
     pushRun("uninstall", false, errorMessage(e));
   } finally {
@@ -1137,40 +1202,37 @@ function isBatchTarget(uuid) {
 function mergeInboundIntoState(formSnapshot, protocolId, state) {
   const port = parsePort(formSnapshot.endpointPort, "端口");
   const tag = makeInboundTag(protocolId, port);
-  const existing = state.meta?.inbounds || [];
+  const engine = getProtocolEngine(protocolId);
+  const existing = [...(state.meta?.inbounds || []), ...(state.xray?.meta?.inbounds || [])];
+  const foreign = [...(state.foreignInbounds || []), ...(state.xray?.foreignInbounds || [])];
   const sameIndex = existing.findIndex((it) => it.tag === tag);
+  assertPortAvailable({ entries: existing, foreign, port, tag, ignoreId: sameIndex >= 0 ? existing[sameIndex].id : null });
   let next;
   if (sameIndex >= 0) {
     next = existing.slice();
     next[sameIndex] = {
       ...existing[sameIndex],
       protocolId,
+      engine,
       tag,
       form: { ...formSnapshot, endpointPort: port },
       updatedAt: Date.now(),
     };
   } else {
-    const conflict = existing.find((it) => it.form.endpointPort === port);
-    if (conflict) throw new Error(`端口 ${port} 已被入站 ${conflict.tag} 占用`);
     next = [
       ...existing,
       {
         id: makeInboundId(),
         tag,
         protocolId,
+        engine,
         form: { ...formSnapshot, endpointPort: port },
         createdAt: Date.now(),
         updatedAt: Date.now(),
       },
     ];
   }
-  const config = buildConfigForEntries(
-    next,
-    state.foreignInbounds || [],
-    state.config,
-  );
-  const meta = makeMeta(next);
-  return { config, meta, nextInbounds: next };
+  return buildEngineDeployment(engine, next, state);
 }
 
 async function batchDeploy() {
@@ -1235,8 +1297,8 @@ async function batchDeploy() {
       );
       try {
         const state = await readNodeState(client, token, uuid, { signal: ctrl.signal });
-        const beforeRemote = state.meta?.inbounds || [];
-        const { config, meta, nextInbounds } = mergeInboundIntoState(
+        const beforeRemote = [...(state.meta?.inbounds || []), ...(state.xray?.meta?.inbounds || [])];
+        const payload = mergeInboundIntoState(
           snapshot,
           protocolId,
           state,
@@ -1244,14 +1306,15 @@ async function batchDeploy() {
         batchProgress.value = batchProgress.value.map((row, idx) =>
           idx === i ? { ...row, status: "deploying" } : row,
         );
-        const r = await deployNodeState(
+        const deploy = payload.engine === "xray" ? deployXrayState : deployNodeState;
+        const r = await deploy(
           client,
           token,
           uuid,
-          { config, meta },
+          payload,
           { signal: ctrl.signal },
         );
-        await syncPortJump(token, uuid, ctrl, beforeRemote, nextInbounds);
+        await syncPortJump(token, uuid, ctrl, beforeRemote, payload.nextInbounds);
         batchProgress.value = batchProgress.value.map((row, idx) =>
           idx === i ? { uuid, status: "ok", message: r.serviceActive } : row,
         );
@@ -1329,6 +1392,10 @@ function watchNode() {
     stateReady.value = false;
     baseConfig.value = null;
     baseConfigSha256.value = "";
+    xrayState.value = null;
+    singboxVersion.value = "";
+    serviceActive.value = "unknown";
+    serviceEnabled.value = "unknown";
     foreignInbounds.value = [];
     inbounds.value = [];
     selectInbound(null);
@@ -1372,6 +1439,10 @@ export function useSingboxPanel() {
     serviceActive,
     serviceEnabled,
     singboxVersion,
+    xrayState,
+    xrayForeignInbounds,
+    serviceEngine,
+    serviceLabel,
     inbounds,
     foreignInbounds,
     selectedInboundId,
@@ -1413,6 +1484,7 @@ export function useSingboxPanel() {
     deleteInbound,
     controlAction,
     upgradeSingboxAction,
+    upgradeXrayAction,
     uninstallAll,
     runRealityScanAction,
     applyRealityCandidate,

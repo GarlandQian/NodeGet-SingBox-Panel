@@ -272,6 +272,7 @@ for (let index = 0; index < 20; index += 1) {
 }
 
 for (const [index, protocol] of PROTOCOLS.entries()) {
+  if (protocol.engine === "xray") continue;
   const form = makeForm(protocol, index);
   const generatedInbound = buildSingBoxInbound(protocol.id, form);
   assert.equal(generatedInbound.tag, `nodeget-${protocol.id}-${form.endpointPort}`);
@@ -632,4 +633,5 @@ const hysteriaOutbound = JSON.parse(
 assert.deepEqual(hysteriaOutbound.server_ports, ["30000:30100"]);
 assert.equal("server_port" in hysteriaOutbound, false);
 
+await import("./verify-xhttp.mjs");
 console.log(`verified ${PROTOCOLS.length} protocols and deployment safety invariants`);

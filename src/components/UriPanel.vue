@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { useSingboxPanel } from "@/composables/useSingboxPanel";
 
-const { connectionInfo, allShareUris, copyAllUris, downloadExport, inbounds } =
+const { connectionInfo, allShareUris, copyAllUris, downloadExport, inbounds, serviceEngine } =
   useSingboxPanel();
 
 const exportOpen = ref(false);
@@ -59,6 +59,9 @@ function exportAs(format) {
           </div>
         </div>
         <pre class="output-box compact">{{ connectionInfo?.uri || "等待填写完成后自动生成" }}</pre>
+        <p v-if="serviceEngine === 'xray'" class="field-hint">
+          XHTTP 联调基线：Mihomo v1.19.33。需保留 support-x25519mlkem768=true；若导入器丢失参数，请改用 Mihomo YAML。sing-box 不支持此节点。
+        </p>
       </div>
     </div>
   </section>

@@ -34,9 +34,13 @@ jobs:
           cat > release-notes.md <<'NOTES'
           ## Changed
 
-          - Changes generated inbound listeners from IPv4-only to IPv4/IPv6 dual stack.
-          - Keeps automatic endpoint selection IPv4-first with IPv6 fallback.
-          - Verifies bracketed IPv6 host formatting in share links.
+          - Adds optional isolated Xray management for VLESS + XHTTP + REALITY over HTTP/2 in stream-one mode.
+          - Exports VLESS URIs and Mihomo YAML with the required REALITY key-exchange compatibility option.
+          - Uses Xray v26.10.21 and Mihomo v1.19.33 as the verified interoperability baseline; keeps existing sing-box nodes unchanged.
+          - Separates service controls, state, configuration checks, version updates, and rollback by core.
+          - Verifies engine isolation, port conflicts, revision checks, file permissions, service ownership, and failed-deployment rollback.
+
+          Initial XHTTP scope: direct connections and direct egress only; no next-hop, CDN/reverse proxy, split download, certificate TLS, or HTTP/3 support.
           NOTES
 
       - name: Publish release

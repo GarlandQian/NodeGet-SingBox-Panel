@@ -5,6 +5,7 @@
 ## 支持
 
 - 添加 VLESS Reality / HTTP2 Reality
+- 按需安装独立 Xray，添加 VLESS + XHTTP + REALITY（HTTP/2、stream-one），提供 URI 和 Mihomo YAML
 - 添加 VLESS、VMess、Trojan 的 WS / H2 / gRPC / HTTPUpgrade 等常见组合
 - 添加 Shadowsocks、TUIC、Hysteria2、AnyTLS、SOCKS
 - 为单个入站设置下一跳节点 URI，并按入站独立路由
@@ -30,6 +31,9 @@
 - 已存在的 systemd/OpenRC `sing-box` 服务定义不会被面板覆盖
 - “移除面板配置”只删除面板管理的入站、下一跳出站/路由和端口跳跃，不卸载程序或删除其他配置
 - 服务名使用 `sing-box`
+- XHTTP 使用面板专属 `nodeget-xray` 服务，不接管系统已有 Xray；支持独立状态读取、服务控制、配置检查、更新及失败回滚
+- XHTTP 服务端固定基线 Xray v26.10.21，客户端联调基线 Mihomo v1.19.33；导出已包含必需的 `support-x25519mlkem768=true` 兼容参数
+- XHTTP 首版仅直连、本机直出，不支持下一跳、CDN/反代、上下行分离、证书 TLS 或 HTTP/3；sing-box 格式无法导出 XHTTP
 - VLESS Reality 密钥在添加配置时由面板本地生成
 - Reality 目标筛选会在节点 cache 目录下载 RealiTLScanner 和 RealityChecker
 - Reality 目标筛选只对用户输入的目标运行，不会自动生成扫描范围

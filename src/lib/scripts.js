@@ -7,6 +7,11 @@ import uninstallScript from "./scripts/uninstall.sh?raw";
 import realityScanScript from "./scripts/reality_scan.sh?raw";
 import portjumpApplyScript from "./scripts/portjump_apply.sh?raw";
 import portjumpRemoveScript from "./scripts/portjump_remove.sh?raw";
+import xrayPrelude from "./scripts/_xray.sh?raw";
+import xrayReadScript from "./scripts/xray_read_state.sh?raw";
+import xrayDeployScript from "./scripts/xray_deploy.sh?raw";
+import xrayControlScript from "./scripts/xray_control.sh?raw";
+import { XRAY_RELEASE } from "./xray";
 
 function shellQuote(value) {
   return `'${String(value ?? "").replaceAll("'", `'\\''`)}'`;
@@ -35,7 +40,23 @@ function assemble(env, body) {
 }
 
 export function buildReadStateScript() {
-  return assemble({}, readStateScript);
+  return assemble({}, `${readStateScript}\n${xrayPrelude}\n${xrayReadScript}`);
+}
+
+export function buildXrayDeployScript({ config, meta, configSha256, metaSha256, upgrade = false }) {
+  if (!configSha256 || !metaSha256) throw new Error("请先读取 Xray 配置及元数据版本");
+  return assemble({
+    NGP_XRAY_RELEASE: XRAY_RELEASE,
+    NGP_XRAY_OPERATION: upgrade ? "upgrade" : "deploy",
+    NGP_XRAY_CONFIG_SHA256: configSha256,
+    NGP_XRAY_META_SHA256: metaSha256,
+    ...(!upgrade ? { NGP_CONFIG_B64: jsonToBase64(config), NGP_META_B64: jsonToBase64(meta) } : {}),
+  }, `${xrayPrelude}\n${xrayDeployScript}`);
+}
+
+export function buildXrayControlScript(action) {
+  if (!["start", "stop", "restart"].includes(action)) throw new Error("无效的 Xray 服务操作");
+  return assemble({ NGP_ACTION: action }, `${xrayPrelude}\n${xrayControlScript}`);
 }
 
 export function buildDeployScript({ config, meta }) {

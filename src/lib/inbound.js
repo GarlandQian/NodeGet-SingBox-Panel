@@ -194,6 +194,7 @@ function attachTlsAndTransport(inbound, protocol, form) {
 export function buildSingBoxInbound(protocolId, form) {
   const protocol = getProtocol(protocolId);
   if (!protocol) throw new Error(`未知协议：${protocolId}`);
+  if (protocol.engine === "xray") throw new Error("XHTTP 必须由 Xray 管理，不能写入 sing-box 配置");
 
   const port = Number(form.endpointPort);
   const tag = makeInboundTag(protocol.id, port);

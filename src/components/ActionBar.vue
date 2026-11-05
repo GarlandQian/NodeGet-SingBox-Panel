@@ -18,6 +18,9 @@ const {
   saveInbound,
   controlAction,
   upgradeSingboxAction,
+  upgradeXrayAction,
+  serviceEngine,
+  serviceLabel,
   regenSecret,
   copyUri,
   deleteInbound,
@@ -185,7 +188,7 @@ onBeforeUnmount(() => {
               :data-theme="theme"
               :style="morePopoverStyle"
             >
-              <div class="more-group-label">服务</div>
+              <div class="more-group-label">服务 · {{ serviceLabel }}</div>
               <button
                 class="more-item"
                 role="menuitem"
@@ -214,9 +217,9 @@ onBeforeUnmount(() => {
                 class="more-item"
                 role="menuitem"
                 :disabled="batchMode || commandRunning"
-                @click="withClose(upgradeSingboxAction)()"
+                @click="withClose(serviceEngine === 'xray' ? upgradeXrayAction : upgradeSingboxAction)()"
               >
-                升级 sing-box
+                {{ serviceEngine === 'xray' ? '更新 Xray（兼容基线）' : '升级 sing-box' }}
               </button>
               <div class="more-sep" />
               <div class="more-group-label">表单</div>

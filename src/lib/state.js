@@ -1,4 +1,5 @@
 import { isNodegetTag } from "./inbound";
+import { getEntryEngine } from "./protocols";
 
 export const META_VERSION = 2;
 
@@ -7,7 +8,7 @@ export function emptyMeta() {
 }
 
 export function makeMeta(inbounds) {
-  return { version: META_VERSION, inbounds };
+  return { version: META_VERSION, inbounds: inbounds.map((entry) => ({ ...entry, engine: getEntryEngine(entry) })) };
 }
 
 function parseScalars(text) {
@@ -53,6 +54,22 @@ export function parseReadStateOutput(rawOutput) {
   const config = tryParseJson(configRaw);
   const parsedMeta = tryParseJson(metaRaw);
   const meta = migrateMeta(parsedMeta);
+  const xrayConfigRaw = extractBlock(text, "XRAY_CONFIG");
+  const xrayMetaRaw = extractBlock(text, "XRAY_META");
+  const xrayConfig = tryParseJson(xrayConfigRaw);
+  const xrayParsedMeta = tryParseJson(xrayMetaRaw);
+  const xrayMeta = migrateMeta(xrayParsedMeta);
+  const xrayConfigValid = xrayConfig && typeof xrayConfig === "object" && !Array.isArray(xrayConfig) &&
+    ["inbounds", "outbounds"].every((key) => xrayConfig[key] == null || Array.isArray(xrayConfig[key]));
+  const xrayMetaValid = xrayParsedMeta && Number(xrayParsedMeta.version) >= 2 && Array.isArray(xrayParsedMeta.inbounds);
+  for (const entry of meta.inbounds) {
+    if (getEntryEngine(entry) !== "singbox") throw new Error("sing-box 元数据中包含其他内核入站，已停止操作");
+  }
+  for (const entry of xrayMeta.inbounds) {
+    if (getEntryEngine(entry) !== "xray") throw new Error("Xray 元数据中包含其他内核入站，已停止操作");
+  }
+  const ids = [...meta.inbounds, ...xrayMeta.inbounds].map((entry) => entry.id);
+  if (new Set(ids).size !== ids.length) throw new Error("入站元数据存在重复 ID，请修复后重新读取");
   const outputTruncated = /\[\.\.\. Output truncated,/.test(text);
   const configParseError = Boolean(configRaw.trim()) && config == null;
   const metaParseError = Boolean(metaRaw.trim()) && parsedMeta == null;
@@ -87,8 +104,42 @@ export function parseReadStateOutput(rawOutput) {
     metaRaw,
     config,
     meta,
+    xray: {
+      version: scalars.XRAY_VERSION || "missing",
+      serviceActive: scalars.XRAY_SERVICE_ACTIVE || "unknown",
+      serviceEnabled: scalars.XRAY_SERVICE_ENABLED || "unknown",
+      configSha256: scalars.XRAY_CONFIG_SHA256 || "",
+      metaSha256: scalars.XRAY_META_SHA256 || "",
+      config: xrayConfig,
+      meta: xrayMeta,
+      configParseError: Boolean(xrayConfigRaw.trim()) && !xrayConfigValid,
+      metaParseError: Boolean(xrayMetaRaw.trim()) && !xrayMetaValid,
+      configCheckRaw: extractBlock(text, "XRAY_CONFIG_CHECK"),
+      serviceLogRaw: extractBlock(text, "XRAY_SERVICE_LOG"),
+      foreignInbounds: (Array.isArray(xrayConfig?.inbounds) ? xrayConfig.inbounds : []).filter((entry) => !xrayMeta.inbounds.some((managed) => managed.tag === entry.tag)),
+    },
     foreignInbounds,
     orphanManagedInbounds,
+  };
+}
+
+export function redactStateOutput(output) {
+  // Persist only known status fields; config checks and service logs can also contain secrets.
+  const scalars = parseScalars(output);
+  const keys = ["SINGBOX_VERSION", "SERVICE_ACTIVE", "SERVICE_ENABLED", "SERVICE_MANAGER",
+    "XRAY_VERSION", "XRAY_SERVICE_ACTIVE", "XRAY_SERVICE_ENABLED", "HOST_ARCH", "HOST_KERNEL"];
+  return keys.filter((key) => scalars[key]).map((key) => `NGP_${key}=${scalars[key]}`).join("\n") +
+    "\n[原始配置、凭据及服务日志不保存在浏览器历史中]";
+}
+
+export function parseXrayOutput(output) {
+  const scalars = parseScalars(output);
+  return {
+    ...parseDeployOutput(output),
+    metaSha256: scalars.META_SHA256 || "",
+    version: scalars.XRAY_VERSION || "unknown",
+    oldVersion: scalars.XRAY_VERSION_OLD || "unknown",
+    serviceEnabled: scalars.SERVICE_ENABLED || "unknown",
   };
 }
 

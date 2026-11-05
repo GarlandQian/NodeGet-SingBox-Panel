@@ -11,6 +11,7 @@ const {
   refreshNodes,
   singboxVersion,
   serviceActive,
+  xrayState,
   commandRunning,
   batchRunning,
   realityRunning,
@@ -98,6 +99,14 @@ function displayName(uuid) {
               :class="`status-${serviceActive}`"
             >
               {{ serviceActive }}
+            </span>
+          </div>
+          <div v-if="!batchMode && uuid === selectedUuid" class="node-status">
+            <span class="node-status-meta">
+              {{ xrayState?.version && xrayState.version !== 'missing' ? `Xray ${xrayState.version}` : 'Xray 未装' }}
+            </span>
+            <span class="node-status-badge" :class="`status-${xrayState?.serviceActive || 'unknown'}`">
+              {{ xrayState?.serviceActive || 'unknown' }}
             </span>
           </div>
         </div>

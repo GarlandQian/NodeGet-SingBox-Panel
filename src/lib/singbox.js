@@ -66,6 +66,14 @@ function shareHost(form) {
 
 function appendTransportParams(params, protocol, form) {
   if (!protocol.transport || protocol.transport === "tcp") return;
+  if (protocol.transport === "xhttp") {
+    params.set("path", form.path || "/");
+    if (form.transportHost) params.set("host", form.transportHost);
+    params.set("mode", "stream-one");
+    params.set("alpn", "h2");
+    params.set("support-x25519mlkem768", "true");
+    return;
+  }
   if (protocol.transport === "ws" || protocol.transport === "http" || protocol.transport === "httpupgrade") {
     params.set("path", form.path || "/");
     if (form.transportHost) params.set("host", form.transportHost);
@@ -229,6 +237,10 @@ export function buildConnectionDetails(protocolId, form) {
   if (protocol.tlsMode === "reality" && cleaned.shortId) details.push(["Short ID", cleaned.shortId]);
   if (protocol.transport && protocol.transport !== "tcp" && cleaned.path) details.push(["Path", cleaned.path]);
   if (protocol.transport === "grpc" && cleaned.serviceName) details.push(["Service Name", cleaned.serviceName]);
+  if (protocol.transport === "xhttp") {
+    details.push(["内核", "Xray"], ["Mode", "stream-one"], ["ALPN", "h2"]);
+    if (cleaned.transportHost) details.push(["Host", cleaned.transportHost]);
+  }
   if ((protocol.transport === "ws" || protocol.transport === "http" || protocol.transport === "httpupgrade") && cleaned.transportHost) {
     details.push(["Host", cleaned.transportHost]);
   }

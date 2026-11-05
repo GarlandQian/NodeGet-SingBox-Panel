@@ -2,7 +2,7 @@
 import { getProtocol, PROTOCOL_GROUPS } from "@/lib/protocols";
 import { useSingboxPanel } from "@/composables/useSingboxPanel";
 
-const { selectedProtocolId, isEditing, selectProtocol } = useSingboxPanel();
+const { selectedProtocolId, isEditing, selectProtocol, commandRunning, batchRunning } = useSingboxPanel();
 
 function onChange(event) {
   selectProtocol(event.target.value);
@@ -15,7 +15,7 @@ function onChange(event) {
     <select
       :value="selectedProtocolId"
       class="select"
-      :disabled="isEditing"
+      :disabled="isEditing || commandRunning || batchRunning"
       @change="onChange"
     >
       <optgroup
