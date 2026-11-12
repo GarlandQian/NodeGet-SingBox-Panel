@@ -32,17 +32,21 @@ jobs:
       - name: Write release notes
         run: |
           cat > release-notes.md <<'NOTES'
-          ## Fixed
+          ## Changes
 
-          - Fixes XHTTP installation preflight by using config.stage.json, a filename accepted by the pinned Xray v26.10.21 loader.
-          - Separates NodeGet task delivery, process exit status, and operation postconditions to prevent false deployment success.
-          - Requires request-correlated completion receipts, valid version/configuration digests, and operation-specific service state before updating the panel.
-          - Preserves child-script cleanup and rollback traps, and shows redacted diagnostics without saving configuration credentials to browser history.
-          - Adds production-staging and lifecycle regression checks, including rejection of the old .stage path, invalid configurations, truncated results, stopped-service updates, and rollback.
+          - Enables native XHTTP TCP multiplexing (XMUX) for VLESS + XHTTP + REALITY over HTTP/2, using stream-one.
+          - Includes extra.xmux in VLESS share URIs and matching xhttp-opts.reuse-settings in Mihomo YAML, with a three-connection pool and a configured reuse window of 1800-3000 seconds.
+          - Shows TCP multiplexing in the panel and validates that generated URIs retain the complete reuse settings.
 
-          The staging checks were also run locally with real Xray v26.10.21; URI/YAML IPv4/IPv6 TCP/UDP interoperability was reverified with Mihomo v1.19.33. Linux service management was simulated, not tested on a production node.
+          ## Upgrade
 
-          Initial XHTTP scope: direct connections and direct egress only; no next-hop, CDN/reverse proxy, split download, certificate TLS, or HTTP/3 support.
+          Update the panel, then copy and reimport the URI or export Mihomo YAML. Existing XHTTP inbounds do not need redeployment. The connection remains direct REALITY with no upload/download separation.
+
+          ## Verification
+
+          Protocol and deployment regressions and the production package build passed. Local tests with Xray v26.10.21 and Mihomo v1.19.33 verified both URI and YAML imports over IPv4/IPv6, TCP and UDP, and 12 concurrent requests sharing an established pool of three TCP connections without additional dials.
+
+          The pool size is not a hard cap on all TCP connections during initial dialing or rotation. Live tests used local loopback fixtures; production network performance and Linux service management were not tested on a real node.
           NOTES
 
       - name: Publish release
