@@ -45,6 +45,19 @@ assert.equal(url.searchParams.get("mode"), "stream-one");
 assert.equal(url.searchParams.get("alpn"), "h2");
 assert.equal(url.searchParams.get("support-x25519mlkem768"), "true");
 assert.equal(url.searchParams.has("flow"), false);
+const xhttpExtra = { xmux: { maxConnections: 3, hMaxReusableSecs: "1800-3000" } };
+assert.deepEqual(JSON.parse(url.searchParams.get("extra")), xhttpExtra);
+for (const extra of [
+  null, "not-json", "null", "[]",
+  JSON.stringify({ xmux: { maxConnections: 3 } }),
+  JSON.stringify({ ...xhttpExtra, downloadSettings: { address: "other.example" } }),
+  JSON.stringify({ xmux: { ...xhttpExtra.xmux, maxConcurrency: 16 } }),
+]) {
+  const invalid = new URL(uri);
+  if (extra === null) invalid.searchParams.delete("extra");
+  else invalid.searchParams.set("extra", extra);
+  assert.throws(() => validateXhttpShareUri(invalid.toString()), /多路复用/);
+}
 assert.ok(uri.includes("@[2001:db8::8]:23456"));
 assert.throws(() => parseNextHopUri(uri));
 assert.throws(() => validateXhttpShareUri(uri.replace("stream-one", "auto")));
@@ -54,6 +67,8 @@ assert.match(yaml, /network: xhttp/);
 assert.match(yaml, /mode: stream-one/);
 assert.match(yaml, /- h2/);
 assert.match(yaml, /support-x25519mlkem768: true/);
+assert.match(yaml, /reuse-settings:\n\s+max-connections: 3\n\s+h-max-reusable-secs: 1800-3000/);
+assert.doesNotMatch(yaml, /download-settings:|smux:|h-max-request-times:/);
 assert.doesNotMatch(yaml, /flow:/);
 
 const config = buildXrayConfig([entry]);

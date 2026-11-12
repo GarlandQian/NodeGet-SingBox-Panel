@@ -60,7 +60,7 @@ function exportAs(format) {
         </div>
         <pre class="output-box compact">{{ connectionInfo?.uri || "等待填写完成后自动生成" }}</pre>
         <p v-if="serviceEngine === 'xray'" class="field-hint">
-          XHTTP 联调基线：Mihomo v1.19.33。需保留 support-x25519mlkem768=true；若导入器丢失参数，请改用 Mihomo YAML。sing-box 不支持此节点。
+          XHTTP 已配置原生 TCP 多路复用，联调基线为 Mihomo v1.19.33。URI 需保留 extra 中的 xmux 和 support-x25519mlkem768=true；若导入器丢失参数，请改用 Mihomo YAML。sing-box 不支持此节点。
         </p>
       </div>
     </div>

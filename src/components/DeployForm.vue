@@ -168,7 +168,7 @@ function fieldError(key) {
     </div>
 
     <div v-if="protocol?.engine === 'xray'" class="field-hint">
-      Xray 独立服务 · REALITY · HTTP/2 · stream-one。首版仅直连、本机直出，不支持下一跳、CDN 或上下行分离。
+      Xray 独立服务 · REALITY · HTTP/2（TCP）· stream-one。导出默认启用原生 TCP 多路复用，仅直连、本机直出。
     </div>
     <section v-else class="next-hop-section">
       <label class="next-hop-toggle">

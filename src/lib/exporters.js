@@ -1,5 +1,6 @@
 import { buildShareUri } from "./singbox";
 import { getProtocol } from "./protocols";
+import { MIHOMO_XHTTP_REUSE_SETTINGS } from "./xhttp";
 
 function compactObject(object) {
   return Object.fromEntries(
@@ -84,6 +85,7 @@ function inboundToClashProxy(inbound, fallbackLabel) {
       proxy["xhttp-opts"] = {
         path: form.path || "/",
         mode: "stream-one",
+        "reuse-settings": { ...MIHOMO_XHTTP_REUSE_SETTINGS },
         ...(form.transportHost ? { host: form.transportHost } : {}),
       };
     } else if (protocol.transport === "ws") {

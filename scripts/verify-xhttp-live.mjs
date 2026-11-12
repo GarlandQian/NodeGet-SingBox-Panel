@@ -21,6 +21,8 @@ const mihomoBin = realpathSync(mihomoArg);
 const taskDir = mkdtempSync(join(tmpdir(), "nodeget-xhttp-live-"));
 const children = new Set();
 const servers = new Set();
+const relaySockets = new Set();
+const concurrentRequests = 12;
 let childLogs = "";
 
 function checked(binary, args) {
@@ -69,11 +71,11 @@ async function waitPort(port, child) {
   throw new Error("core listener startup timed out");
 }
 
-function proxyGet(proxyPort, targetPort) {
+function proxyGet(proxyPort, targetPort, requestPath = "/through-xhttp") {
   return new Promise((resolve, reject) => {
     const request = http.get({
       hostname: "127.0.0.1", port: proxyPort,
-      path: `http://127.0.0.1:${targetPort}/through-xhttp`,
+      path: `http://127.0.0.1:${targetPort}${requestPath}`,
       headers: { Host: `127.0.0.1:${targetPort}`, Connection: "close" },
       timeout: 15000,
     }, (response) => {
@@ -130,7 +132,20 @@ try {
   });
   target.on("request", (_request, response) => { response.end("local TLS target"); });
   const targetPort = await listen(target);
-  const destination = http.createServer((_request, response) => { response.end("nodeget-xhttp-tcp-ok"); });
+  const pendingRequests = new Map();
+  const destination = http.createServer((request, response) => {
+    if (!request.url.startsWith("/mux/")) {
+      response.end("nodeget-xhttp-tcp-ok");
+      return;
+    }
+    const id = request.url.slice("/mux/".length);
+    pendingRequests.set(id, response);
+    // Hold every response until all requests arrive, proving concurrent streams rather than sequential reuse.
+    if (pendingRequests.size === concurrentRequests) {
+      for (const [key, pending] of pendingRequests) pending.end(`nodeget-xhttp-mux-${key}`);
+      pendingRequests.clear();
+    }
+  });
   const destinationPort = await listen(destination);
   const udpEcho = dgram.createSocket("udp4");
   udpEcho.on("message", (message, remote) => udpEcho.send(message, remote.port, remote.address));
@@ -145,8 +160,12 @@ try {
   const entry = { id: "live", protocolId: XHTTP_PROTOCOL, tag: `nodeget-${XHTTP_PROTOCOL}-${port}`, form };
   const config = buildXrayConfig([entry]);
   if (process.env.NGP_SMOKE_DEBUG) config.log = { loglevel: "debug" };
+  // Bind both address families to loopback while retaining the generated transport settings.
+  config.inbounds[0].listen = "127.0.0.1";
+  config.inbounds.push({ ...structuredClone(config.inbounds[0]), listen: "::1", tag: `${entry.tag}-ipv6` });
+  config.routing.rules[0].inboundTag.push(`${entry.tag}-ipv6`);
   // Only replace the handshake target with our local TLS fixture, not the protocol settings.
-  config.inbounds[0].streamSettings.realitySettings.target = `127.0.0.1:${targetPort}`;
+  for (const inbound of config.inbounds) inbound.streamSettings.realitySettings.target = `127.0.0.1:${targetPort}`;
   // The release blocks loopback proxy destinations by default. Allow only our fixture here.
   config.outbounds[0].settings.finalRules = [{ action: "allow", ip: ["127.0.0.1/32", "::1/128"] }];
   const configPath = join(taskDir, "xray.json");
@@ -155,12 +174,30 @@ try {
   const xray = launch(xrayBin, ["run", "-config", configPath]);
   await waitPort(port, xray);
   for (const host of ["127.0.0.1", "::1"]) {
+    let tcpConnections = 0;
+    // Observe encrypted client-to-Xray connections without changing HTTP/2 or REALITY traffic.
+    const relay = net.createServer((socket) => {
+      tcpConnections += 1;
+      const upstream = net.connect({ host, port });
+      for (const connection of [socket, upstream]) {
+        relaySockets.add(connection);
+        connection.once("close", () => relaySockets.delete(connection));
+      }
+      socket.on("error", () => upstream.destroy());
+      upstream.on("error", () => socket.destroy());
+      socket.on("close", () => upstream.destroy());
+      upstream.on("close", () => socket.destroy());
+      socket.pipe(upstream);
+      upstream.pipe(socket);
+    });
+    const relayPort = await listen(relay, host);
     for (const format of ["yaml", "uri"]) {
+      const connectionsBefore = tcpConnections;
       const clientPort = await freePort();
       const clientDir = join(taskDir, `client-${clientPort}`);
       mkdirSync(clientDir);
       const label = "smoke";
-      const clientForm = { ...form, endpointHost: host };
+      const clientForm = { ...form, endpointHost: host, endpointPort: relayPort };
       const providerFile = join(clientDir, "uris.txt");
       writeFileSync(providerFile, buildShareUri(XHTTP_PROTOCOL, clientForm, `${label}-${entry.tag}`), { mode: 0o600 });
       const proxyConfig = format === "yaml"
@@ -174,12 +211,26 @@ try {
       checked(mihomoBin, ["-t", "-d", clientDir, "-f", clientPath]);
       const mihomo = launch(mihomoBin, ["-d", clientDir, "-f", clientPath]);
       await waitPort(clientPort, mihomo);
-      assert.deepEqual(await proxyGet(clientPort, destinationPort), { status: 200, body: "nodeget-xhttp-tcp-ok" });
+      // Establish the pool sequentially: net/http may race extra dials before a new H2 connection is ready.
+      for (let warmup = 0; warmup < 3; warmup += 1) {
+        assert.deepEqual(await proxyGet(clientPort, destinationPort), { status: 200, body: "nodeget-xhttp-tcp-ok" });
+      }
+      const connectionsAfterWarmup = tcpConnections;
+      const responses = await Promise.all(Array.from({ length: concurrentRequests }, (_, id) =>
+        proxyGet(clientPort, destinationPort, `/mux/${id}`)));
+      for (const [id, response] of responses.entries()) {
+        assert.deepEqual(response, { status: 200, body: `nodeget-xhttp-mux-${id}` });
+      }
       await proxyUdp(clientPort, udpEcho.address().port);
+      const usedConnections = tcpConnections - connectionsBefore;
+      assert.equal(tcpConnections, connectionsAfterWarmup,
+        `${host} ${format}: concurrent requests opened TCP connections instead of reusing the established pool`);
+      assert.ok(usedConnections > 0 && usedConnections <= 3,
+        `${host} ${format}: ${concurrentRequests} concurrent requests used ${usedConnections} TCP connections; XMUX was not preserved`);
       mihomo.kill("SIGTERM");
       await once(mihomo, "exit");
       children.delete(mihomo);
-      console.log(`verified real Mihomo -> XHTTP/REALITY -> Xray: ${host}, ${format}, HTTP/2 stream-one, TCP + UDP`);
+      console.log(`verified real Mihomo -> XHTTP/REALITY -> Xray: ${host}, ${format}, HTTP/2 stream-one, TCP + UDP, ${concurrentRequests} concurrent streams / ${usedConnections} TCP connections`);
     }
   }
 } catch (error) {
@@ -194,6 +245,7 @@ try {
       if (child.exitCode == null) child.kill("SIGKILL");
     }
   }
+  for (const socket of relaySockets) socket.destroy();
   for (const server of servers) {
     try { server.close(); } catch { /* already closed */ }
   }

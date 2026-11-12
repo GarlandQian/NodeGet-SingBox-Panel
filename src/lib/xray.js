@@ -1,6 +1,7 @@
 import { getEntryEngine } from "./protocols";
 import { makeInboundTag } from "./inbound";
 import { formatHostPort } from "./singbox";
+import { XHTTP_XMUX } from "./xhttp";
 
 export const XRAY_RELEASE = "v26.10.21";
 export const MIHOMO_BASELINE = "v1.19.33";
@@ -94,6 +95,19 @@ export function validateXhttpShareUri(uri) {
       p.get("support-x25519mlkem768") !== "true" ||
       p.has("flow") || !/^[A-Za-z0-9_-]{43}$/.test(p.get("pbk") || "")) {
     throw new Error("XHTTP 分享 URI 参数不完整或不受支持");
+  }
+  // Check the generated profile, including client-side reuse; do not silently accept lost settings.
+  let extra;
+  try {
+    extra = JSON.parse(p.get("extra"));
+  } catch {
+    throw new Error("XHTTP 分享 URI 的 TCP 多路复用参数无效");
+  }
+  const xmux = extra?.xmux;
+  if (!extra || Object.keys(extra).length !== 1 || !xmux ||
+      Object.keys(xmux).length !== Object.keys(XHTTP_XMUX).length ||
+      Object.entries(XHTTP_XMUX).some(([key, value]) => xmux[key] !== value)) {
+    throw new Error("XHTTP 分享 URI 缺少完整的 TCP 多路复用参数");
   }
   validateXhttpForm({
     endpointPort: url.port, handshakePort: 443, uuid: decodeURIComponent(url.username),

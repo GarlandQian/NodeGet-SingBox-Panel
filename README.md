@@ -5,7 +5,7 @@ NodeGet Dashboard 扩展，用于在节点上安装和管理 sing-box 配置。
 ## 支持
 
 - 添加 VLESS Reality / HTTP2 Reality
-- 按需安装独立 Xray，添加 VLESS + XHTTP + REALITY（HTTP/2、stream-one）
+- 按需安装独立 Xray，添加 VLESS + XHTTP + REALITY（HTTP/2、stream-one、原生 TCP 多路复用）
 - 添加 VLESS、VMess、Trojan 的 WS / H2 / gRPC / HTTPUpgrade 等常见组合
 - 添加 Shadowsocks、TUIC、Hysteria2、AnyTLS、SOCKS
 - 为单个入站设置下一跳节点 URI，并按入站独立路由
@@ -54,9 +54,11 @@ NodeGet Dashboard 扩展，用于在节点上安装和管理 sing-box 配置。
 
 - 固定服务端基线 [Xray v26.10.21](https://github.com/XTLS/Xray-core/releases/tag/v26.10.21)，客户端联调基线 [Mihomo v1.19.33](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.33)；不代表兼容所有历史或后续版本
 - 协议固定 VLESS + XHTTP + REALITY，HTTP/2、`stream-one`，不设置 Vision flow；默认随机端口 10000–65500，支持 IPv4/IPv6 监听，出站域名优先 IPv4 并保留 IPv6 回退
+- 默认启用 XHTTP 原生 TCP 多路复用（XMUX），多个代理请求通过 HTTP/2 共用 TCP 连接。URI 使用 `extra.xmux`，Mihomo YAML 使用 `xhttp-opts.reuse-settings`；连接池目标为 3 条，复用时长配置为 1800–3000 秒，具体轮换由客户端核心执行。采用固定 Xray 基线的连接数和寿命设置，不叠加 Mux.Cool 或 smux。Mihomo 文档指出请求次数计数不严谨，因此两种导出均不设置该项。依据：[Xray 默认设置](https://github.com/XTLS/Xray-core/blob/v26.10.21/infra/conf/transport_method.go#L460)、[Mihomo 复用设置](https://wiki.metacubex.one/config/proxies/transport/#xhttp-optsreuse-settings)
+- 复用由客户端配置控制，现有 XHTTP 入站无需重新部署；更新面板后重新复制 URI 或导出 YAML 并导入客户端即可
 - 仅支持直连、本机直出；不支持 XHTTP 下一跳、XHTTP 入站的下一跳、CDN/反代、上下行分离、证书 TLS 或 HTTP/3
 - 支持添加/编辑/删除、读取、开机自启/启动/停止/重启、独立更新到兼容基线；不会静默跟随 `latest`
-- 提供 VLESS URI 和 Mihomo YAML；客户端导入器可能丢失 XHTTP 参数，应核对 `type=xhttp`、`mode=stream-one`、`alpn=h2`、path、Host、SNI、公钥和 Short ID。sing-box 格式会明确拒绝包含 XHTTP 的导出
+- 提供 VLESS URI 和 Mihomo YAML；客户端导入器可能丢失 XHTTP 参数，应核对 `type=xhttp`、`mode=stream-one`、`alpn=h2`、`extra.xmux`、path、Host、SNI、公钥和 Short ID。sing-box 格式会明确拒绝包含 XHTTP 的导出
 - 此 Xray 基线的 REALITY 要求新的密钥交换，Mihomo 默认会移除它以兼容旧服务端。导出会显式设置 `reality-opts.support-x25519mlkem768: true`，URI 对应 `support-x25519mlkem768=true`；不可省略，否则可能回落到普通证书校验并连接失败。依据：[Xray REALITY 实现](https://github.com/XTLS/REALITY/blob/83f621788ca8/tls.go)、[Mihomo REALITY 选项](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/adapter/outbound/reality.go)、[URI 转换实现](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/common/convert/v.go)
 - 面板专属二进制 `/usr/local/lib/nodeget-singbox-panel/xray`；配置和元数据分别为 `/etc/nodeget-singbox-panel/xray/config.json`、`nodeget.json`，目录 `0700`、配置 `0600`
 - 安装/更新下载官方固定标签的发布包并验证 GitHub 资产 SHA-256，先检查配置，再替换；失败恢复 `.bak` 配置、元数据、二进制及先前服务状态。不会覆盖既有系统 Xray
@@ -84,7 +86,7 @@ NGP_TEST_XRAY_BIN=/absolute/path/to/xray bun scripts/verify-xhttp.mjs
 bun scripts/verify-xhttp-live.mjs /absolute/path/to/xray /absolute/path/to/mihomo
 ```
 
-该测试运行真实内核，用本地 TLS 1.3/H2 目标完成 REALITY 握手，检查 Mihomo YAML 和 URI 导入、IPv4/IPv6 连接、TCP 和 UDP。仅在临时测试配置中放行回环目的地，生产配置保留 Xray 默认的私网保护；不等同于目标 Linux 节点上的 systemd/OpenRC 部署实测。
+该测试运行真实内核，用本地 TLS 1.3/H2 目标完成 REALITY 握手，检查 Mihomo YAML 和 URI 导入、IPv4/IPv6 连接、TCP 和 UDP，并计数真实 TCP 连接，确认连接池建立后 12 个并发请求共用不超过 3 条连接、无需另行建连。连接池设置不是所有时刻的 TCP 连接总数硬上限，首次并发建连或连接轮换可能产生额外连接。仅在临时测试配置中放行回环目的地，生产配置保留 Xray 默认的私网保护；不等同于目标 Linux 节点上的 systemd/OpenRC 部署实测。
 
 ```bash
 bun install

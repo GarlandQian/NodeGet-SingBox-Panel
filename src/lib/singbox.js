@@ -1,4 +1,5 @@
 import { getProtocol } from "./protocols";
+import { XHTTP_XMUX } from "./xhttp";
 
 export function randomHex(byteLength = 8) {
   const bytes = new Uint8Array(byteLength);
@@ -72,6 +73,7 @@ function appendTransportParams(params, protocol, form) {
     params.set("mode", "stream-one");
     params.set("alpn", "h2");
     params.set("support-x25519mlkem768", "true");
+    params.set("extra", JSON.stringify({ xmux: XHTTP_XMUX }));
     return;
   }
   if (protocol.transport === "ws" || protocol.transport === "http" || protocol.transport === "httpupgrade") {
@@ -238,7 +240,7 @@ export function buildConnectionDetails(protocolId, form) {
   if (protocol.transport && protocol.transport !== "tcp" && cleaned.path) details.push(["Path", cleaned.path]);
   if (protocol.transport === "grpc" && cleaned.serviceName) details.push(["Service Name", cleaned.serviceName]);
   if (protocol.transport === "xhttp") {
-    details.push(["内核", "Xray"], ["Mode", "stream-one"], ["ALPN", "h2"]);
+    details.push(["内核", "Xray"], ["Mode", "stream-one"], ["ALPN", "h2"], ["TCP 多路复用", "XMUX"]);
     if (cleaned.transportHost) details.push(["Host", cleaned.transportHost]);
   }
   if ((protocol.transport === "ws" || protocol.transport === "http" || protocol.transport === "httpupgrade") && cleaned.transportHost) {
